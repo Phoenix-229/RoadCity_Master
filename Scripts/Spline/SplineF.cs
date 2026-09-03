@@ -9,6 +9,10 @@ namespace RoadCityMaster
     public class SplineF : MonoBehaviour
     {
         #region "Vars"
+        // The preview spline is rebuilt from the real spline by Setup(ref Vector3[]) every time SplineC.Setup() runs;
+        // nothing reads these nodes across a domain reload, and SplinePreviewNode carries a back-reference to SplineC,
+        // which the serializer would follow. Both reasons point the same way: this list is scratch.
+        [System.NonSerialized]
         public List<SplinePreviewNode> nodes = new List<SplinePreviewNode>();
         public bool isClosed = false;
         public float distance = -1f;

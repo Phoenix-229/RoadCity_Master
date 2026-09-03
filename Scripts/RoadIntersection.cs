@@ -170,6 +170,10 @@ namespace RoadCityMaster
         public LightTypeEnum lightType = LightTypeEnum.Timed;
 
         #region "CalculationData"
+        // Allocated by Intersections.InitializeIntersectionObjectsInternal on every construction pass, so it is
+        // construction scratch and is marked as such: serialization skipped it in any case, and the attribute says so
+        // instead of leaving a warning to say it.
+        [System.NonSerialized]
         public CornerPositionMaker[] cornerPoints;
 
         public Vector3 cornerRR;
@@ -224,6 +228,10 @@ namespace RoadCityMaster
         public float fixedTimeLeftTurnLightLength = 5f;
         public float fixedTimeAllRedLightLength = 1f;
         public float fixedTimeYellowLightLength = 2f;
+        // Rebuilt by CreateFixedSequence() from the four fixedTime* lengths and roadType at the top of Start(), so the
+        // serialized floats above are the saved state and this list is derived from them. TrafficLightSequence also has
+        // no parameterless constructor, which is a second reason not to hand it to the serializer.
+        [System.NonSerialized]
         public List<TrafficLightSequence> fixedTimeSequenceList;
         #endregion
         #endregion

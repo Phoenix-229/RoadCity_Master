@@ -28,8 +28,24 @@ namespace RoadCityMaster
         public int id = 0;
         //Unique ID
         public string uID;
+        // These three cannot be serialized whatever attribute is put on them: KeyValuePair<K,V> is a BCL struct whose
+        // Key and Value are readonly PROPERTIES, not fields, and Unity serializes fields. RoadDefKeysArray and
+        // RoadDefValuesArray two lines below are the same author's answer to the same problem -- one dictionary written
+        // out as two parallel arrays -- so the pattern to follow already exists in this class.
+        //
+        // HeightHistory is construction scratch either way: Road.cs creates it at ~996 and sets it back to null at
+        // ~1286, inside one pass.
+        //
+        // BridgeParams and TunnelParams are different, and the attribute records a gap rather than closing it. Setup()
+        // fills them, SplineC has no Awake or Start, and Road.cs calls Setup() only while constructing -- so after a
+        // scene reload they are null, and TunnelRunReader, GroundConformRecord and the four span queries at the bottom
+        // of this file all take their null branch and report no bridge and no tunnel. Persisting them means replacing
+        // the element type with a two-float serializable struct, in the readers as well as here. Recorded as B-25.
+        [System.NonSerialized]
         public List<KeyValuePair<float, float>> BridgeParams;
+        [System.NonSerialized]
         public List<KeyValuePair<float, float>> TunnelParams;
+        [System.NonSerialized]
         public List<KeyValuePair<float, float>> HeightHistory;
         public int[] RoadDefKeysArray;
         public float[] RoadDefValuesArray;

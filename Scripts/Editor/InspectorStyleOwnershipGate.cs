@@ -26,6 +26,13 @@ namespace RoadCityMaster
     /// the `-=` can actually remove it; the round trip really restores, checked by doing it; and the yardstick the column
     /// is measured from is still the widest prefix label the tool draws. Report lines are prefixed RCMSTYLE.
     ///
+    /// Case 1 exempts the owning file, because writing those settings is its job -- with one exception, which case 5
+    /// carries: the ACTIVE SKIN is barred to the owner as well. `GUI.skin` cannot be read outside a GUI callback and the
+    /// owner's restore runs on `delayCall`, which is not one; it is also per-pass state that can differ between windows,
+    /// so a value captured in one pass and put back in another lands on the wrong skin. The first version of both files
+    /// did that and threw `ArgumentException: You can only call GUI functions from inside OnGUI`. So nothing here reads
+    /// `GUI.skin` either, and case 5's last assertion is what keeps it that way.
+    ///
     /// What it does NOT prove: that the result looks right. Whether `Gizmo new Node preview Color:` now fits on one line
     /// on this author's display, at their font scaling, in a docked inspector of their width, is theirs to see. </summary>
     public static class InspectorStyleOwnershipGate
@@ -305,13 +312,22 @@ namespace RoadCityMaster
 
 
         #region "Case 5 -- the round trip really restores"
-        /// <summary> Case 5. The only case here that RUNS the thing rather than reading it. Four values are noted, the
-        /// layout is applied, the restore is called, and the four have to come back exactly. Every other case is a
+        /// <summary> Case 5. The only case here that RUNS the thing rather than reading it. Three values are noted, the
+        /// layout is applied, the restore is called, and the three have to come back exactly. Every other case is a
         /// source check and would pass just as happily against a restore that put back the wrong field.
         ///
         /// A pending restore is drained FIRST. Otherwise, if a real inspector repainted a moment ago, the values noted
         /// below would be the TOOL's -- and the restore, which puts back what the editor had before this tool ever
         /// wrote to it, would correctly disagree with them and so fail a working fix.
+        ///
+        /// **This case may not read `GUI.skin`, and neither may the owner.** This gate runs from a menu item and from
+        /// batch mode, so it is not inside a GUI callback, and `GUI.skin` outside one throws
+        /// `ArgumentException: You can only call GUI functions from inside OnGUI`. The first version of this case read
+        /// it three times and the owner's restore read it once, which is where that exception came from. `GUI.skin` is
+        /// also per-pass state that can differ between windows, so a value captured in one pass and put back in another
+        /// would be written onto the wrong skin. The last assertion below is what keeps it out: a source check that the
+        /// owner never mentions `GUI.skin` again. A `GUILayout.Label` that needs wrapping passes
+        /// `EditorStyles.wordWrappedLabel` instead.
         ///
         /// Skipped rather than failed when there is no skin. `EditorStyles.label` is null until the editor's skin
         /// exists, and in that state Apply is a documented no-op, so there is nothing to prove either way. </summary>
@@ -327,7 +343,6 @@ namespace RoadCityMaster
 
             bool labelWas = EditorStyles.label.wordWrap;
             bool miniWas = EditorStyles.miniLabel.wordWrap;
-            bool skinWas = GUI.skin != null && GUI.skin.label != null && GUI.skin.label.wordWrap;
             float widthWas = EditorGUIUtility.labelWidth;
 
             InspectorTextLayout.Apply();
@@ -335,9 +350,6 @@ namespace RoadCityMaster
             Expect(EditorStyles.label.wordWrap, "case5: Apply() left EditorStyles.label unwrapped, so this tool's own"
                 + " help paragraphs clip instead of wrapping.", failures);
             Expect(EditorStyles.miniLabel.wordWrap, "case5: Apply() left EditorStyles.miniLabel unwrapped.", failures);
-            Expect(GUI.skin == null || GUI.skin.label == null || GUI.skin.label.wordWrap,
-                "case5: Apply() left GUI.skin.label unwrapped -- the wizard draws with GUILayout.Label, which reads the"
-                + " ACTIVE SKIN rather than EditorStyles, so its labels would not wrap.", failures);
             Expect(EditorGUIUtility.labelWidth >= widthWas, "case5: Apply() made the label column NARROWER ("
                 + widthWas.ToString("F0") + " to " + EditorGUIUtility.labelWidth.ToString("F0") + "px). It may only"
                 + " ever widen: on a narrow inspector Unity's own choice is the better one.", failures);
@@ -350,18 +362,32 @@ namespace RoadCityMaster
             Expect(EditorStyles.miniLabel.wordWrap == miniWas, "case5: EditorStyles.miniLabel.wordWrap was not put"
                 + " back (" + EditorStyles.miniLabel.wordWrap.ToString() + " instead of " + miniWas.ToString() + ").",
                 failures);
-
-            bool skinNow = GUI.skin != null && GUI.skin.label != null && GUI.skin.label.wordWrap;
-            Expect(skinNow == skinWas, "case5: GUI.skin.label.wordWrap was not put back (" + skinNow.ToString()
-                + " instead of " + skinWas.ToString() + "). That one is the ACTIVE SKIN: it reaches every window that"
-                + " draws with GUILayout.Label, not only inspectors.", failures);
             Expect(Mathf.Abs(EditorGUIUtility.labelWidth - widthWas) < 0.01f, "case5: the label column was not put"
                 + " back (" + EditorGUIUtility.labelWidth.ToString("F1") + "px instead of "
                 + widthWas.ToString("F1") + "px), so every inspector keeps this tool's column width.", failures);
 
+            // The owner may not set anything this restore cannot legally put back off-pass. GUI.skin is the one that
+            // bit: illegal outside OnGUI, and per-pass state even when it is legal.
+            string ownerPath = Path.Combine(InspectorConsistencyDocWriter.EditorScriptFolder(), Owner);
+            int skinReads = 0;
+            if (File.Exists(ownerPath))
+            {
+                string[] ownerLines = File.ReadAllLines(ownerPath);
+                for (int l = 0; l < ownerLines.Length; l++)
+                {
+                    if (WithoutComment(ownerLines[l]).Contains("GUI.skin")) { skinReads++; }
+                }
+            }
+            Expect(skinReads == 0, "case5: " + Owner + " reads GUI.skin on " + skinReads.ToString() + " line(s). The"
+                + " restore runs on delayCall, which is not a GUI callback, so that throws 'You can only call GUI"
+                + " functions from inside OnGUI' -- and GUI.skin is per-pass state, so a value captured in one pass"
+                + " would be put back onto whichever skin is current later. Pass EditorStyles.wordWrappedLabel to the"
+                + " GUILayout.Label that needs wrapping instead.", failures);
+
             builder.Append("RCMSTYLE case5  editor's own wraps ").Append(labelWas ? "T" : "F")
-                   .Append(miniWas ? "T" : "F").Append(skinWas ? "T" : "F")
-                   .Append("  column ").Append(widthWas.ToString("F0")).Append("px  round trip run\n");
+                   .Append(miniWas ? "T" : "F")
+                   .Append("  column ").Append(widthWas.ToString("F0")).Append("px  round trip run, ")
+                   .Append("owner GUI.skin reads ").Append(skinReads.ToString()).Append("\n");
         }
         #endregion
 

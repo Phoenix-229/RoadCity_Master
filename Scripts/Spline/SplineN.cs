@@ -79,6 +79,9 @@ namespace RoadCityMaster
         public SplineN bridgeCounterpartNode = null;
 
         public RoadIntersection intersection = null;
+        // Per-lane bookkeeping for the intersection currently being built: created in Road.cs at ~907 and nullified at
+        // ~1276, once per construction pass. Scratch by construction, so it is marked scratch.
+        [System.NonSerialized]
         public iConstructionMaker intersectionConstruction;
         #endregion
 

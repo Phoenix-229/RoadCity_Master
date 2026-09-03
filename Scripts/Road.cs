@@ -228,6 +228,9 @@ namespace RoadCityMaster
         [System.NonSerialized]
         public float EditorConstructionStartTime = 0f;
         public bool isEditorError = false;
+        // The exception itself, kept only so the inspector can show what went wrong in the pass that just failed.
+        // System.Exception is not Unity-serializable at all, and isEditorError above is the part worth saving.
+        [System.NonSerialized]
         public System.Exception exceptionError = null;
 
 
@@ -279,6 +282,10 @@ namespace RoadCityMaster
         public Camera editorPlayCamera = null;
         private Vector3 editorCameraBadVec = default(Vector3);
 
+        // Handed over by Terraforming.ProcessRoadTerrainHook (SetEditorTerrainCalcs) for the duration of one terrain
+        // pass and set back to null at the end of it, at lines ~1159 and ~1200. It holds the heightmap float arrays the
+        // pass is working on; serializing it would write a copy of terrain heights into the scene file.
+        [System.NonSerialized]
         public List<Terraforming.TempTerrainData> EditorTTDList;
 
         public bool isEditorConstructing = false;

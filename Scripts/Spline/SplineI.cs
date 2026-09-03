@@ -9,11 +9,18 @@ namespace RoadCityMaster
     public class SplineI : MonoBehaviour
     {
         #region "Vars"
+        // Insert-mode preview nodes, rebuilt by DetermineInsertNodes() from the real spline whenever the node editor
+        // needs them. Scratch, like SplineF's list, and for the same two reasons: nothing reads it across a reload, and
+        // SplinePreviewNode holds a back-reference to SplineC that the serializer would follow.
+        [System.NonSerialized]
         public List<SplinePreviewNode> nodes = new List<SplinePreviewNode>();
         public bool isClosed = false;
         public float distance = -1f;
         public Vector3 mousePos = new Vector3(0f, 0f, 0f);
         public SplineC spline;
+        // The node the insert preview is currently acting on: a pointer into the list above, so it is scratch for the
+        // same reason the list is.
+        [System.NonSerialized]
         public SplinePreviewNode actionNode;
         // Gizmos
         public bool isDrawingGizmos = false;

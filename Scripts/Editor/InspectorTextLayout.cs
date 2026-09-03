@@ -16,7 +16,7 @@ namespace RoadCityMaster
     /// `Gizmo Selected Color:` underneath it. Both halves had to be there for that to happen:
     ///
     /// B-3, the wrap that escaped. Nine assignments across six files wrote `wordWrap = true` into
-    /// `EditorStyles.label`, `EditorStyles.miniLabel` and -- at `Wizard.cs:307` -- `GUI.skin.label`, the ACTIVE SKIN.
+    /// `EditorStyles.label`, `EditorStyles.miniLabel` and -- in the wizard -- `GUI.skin.label`, the ACTIVE SKIN.
     /// None of those is this tool's object; each is one instance the editor owns and hands to every window that asks.
     /// Nothing set them back, so selecting a road once rewrapped label text in Unity's own inspectors and in other
     /// packages' windows until the next domain reload. Four of the nine sat inside an `Init()` behind an
@@ -45,7 +45,24 @@ namespace RoadCityMaster
     /// The one residue, stated rather than papered over: a NON-tool component drawn below one of ours in the same
     /// inspector pass still sees both settings for that one pass. Bounding it tighter would need to know which editor
     /// draws last in a pass, which Unity does not expose. In practice the components under ours are ours, and one pass
-    /// is a repaint, not a session. </summary>
+    /// is a repaint, not a session.
+    ///
+    /// Why the ACTIVE SKIN is no longer touched at all. The first version of this file also set
+    /// `GUI.skin.label.wordWrap` and put it back with the rest, and that was wrong twice over. It threw --
+    /// `ArgumentException: You can only call GUI functions from inside OnGUI`, from `GUI.get_skin` -- because the
+    /// restore runs on `delayCall`, which is not a GUI callback, and reading `GUI.skin` outside one is illegal. Worse
+    /// than the exception: `GUI.skin` is per-pass state that Unity sets at the top of each `OnGUI` and can differ
+    /// between windows, so a restore on a later tick would have written this tool's captured value onto whichever skin
+    /// happened to be current then -- possibly a skin this tool never touched. The mutation also turned out to serve
+    /// no caller. `GUILayout.Label` with no style argument is the only control that reads `GUI.skin.label`, and of the
+    /// six files that call `Apply` the only unstyled ones are seven short section captions in `RoadEditor` --
+    /// `"Materials:"`, `"Physics materials defaults:"` and the like, none of which can wrap. The two long
+    /// `GUILayout.Label` texts in the tool, `RoadEditor.cs:440` and `RoadSystemEditor.cs:105`, already pass an
+    /// explicit style. So the skin handling was removed rather than repaired: nothing here writes to `GUI.skin`, and
+    /// <see cref="InspectorStyleOwnershipGate"/> case 5 asserts that it never starts again. A `GUILayout.Label` added
+    /// later that does need wrapping passes `EditorStyles.wordWrappedLabel`, as the City scene tools already do.
+    /// Everything this file still sets -- the two `EditorStyles` flags and `EditorGUIUtility.labelWidth` -- is legal to
+    /// read and write outside a GUI callback, which is what makes the deferred restore sound. </summary>
     public static class InspectorTextLayout
     {
         #region "The editor's own values"
@@ -55,7 +72,6 @@ namespace RoadCityMaster
         private static bool captured;
         private static bool labelWrapWas;
         private static bool miniLabelWrapWas;
-        private static bool skinLabelWrapWas;
         private static float labelWidthWas;
 
         private static bool restoreArmed;
@@ -77,17 +93,12 @@ namespace RoadCityMaster
             {
                 labelWrapWas = EditorStyles.label.wordWrap;
                 miniLabelWrapWas = EditorStyles.miniLabel.wordWrap;
-                skinLabelWrapWas = GUI.skin != null && GUI.skin.label != null && GUI.skin.label.wordWrap;
                 labelWidthWas = EditorGUIUtility.labelWidth;
                 captured = true;
             }
 
             EditorStyles.label.wordWrap = true;
             EditorStyles.miniLabel.wordWrap = true;
-
-            // The wizard draws with `GUILayout.Label`, which reads the ACTIVE SKIN rather than `EditorStyles`. Covered
-            // here so one caller does not need a second mechanism, and so its restore is the same restore.
-            if (GUI.skin != null && GUI.skin.label != null) { GUI.skin.label.wordWrap = true; }
 
             WidenLabelColumn();
 
@@ -104,6 +115,14 @@ namespace RoadCityMaster
         /// <summary> Hand the shared settings back. Armed by <see cref="Apply"/> to run on the tick after the pass that
         /// asked for them, so the next window to draw sees the editor's own values.
         ///
+        /// Everything touched here is legal outside a GUI callback, and that is a constraint on this method, not an
+        /// observation about it: `delayCall` is not `OnGUI`, so a `GUI.*` member read here throws
+        /// `ArgumentException: You can only call GUI functions from inside OnGUI`. The first version of this file read
+        /// `GUI.skin` and did exactly that. `EditorStyles.label`, `EditorStyles.miniLabel` and
+        /// `EditorGUIUtility.labelWidth` are plain objects and a plain static, safe to read and write off-pass once the
+        /// skin exists -- which the `EditorStyles.label == null` guard below is what establishes. **Nothing that this
+        /// method cannot legally put back may be set in <see cref="Apply"/>.**
+        ///
         /// Public because the restore is the half of this that can actually be wrong, and a private one could only be
         /// checked by reading the source. <see cref="InspectorStyleOwnershipGate"/> calls it to prove that what Apply
         /// sets, this puts back -- exactly, and including the values captured before the tool ever wrote to them. Calling
@@ -118,7 +137,6 @@ namespace RoadCityMaster
 
             EditorStyles.label.wordWrap = labelWrapWas;
             EditorStyles.miniLabel.wordWrap = miniLabelWrapWas;
-            if (GUI.skin != null && GUI.skin.label != null) { GUI.skin.label.wordWrap = skinLabelWrapWas; }
             EditorGUIUtility.labelWidth = labelWidthWas;
         }
         #endregion
