@@ -413,12 +413,35 @@ namespace RoadCityMaster
                     SplineN node1 = node.originalConnectionNodes[0];
                     SplineN node2 = node.originalConnectionNodes[1];
                     node.specialNodeCounterpart.BreakConnection();
-                    node.spline.road.UpdateRoad();
+                    // B-14. Was `node.spline.road.UpdateRoad()` here, between the break and the reconnect: a full
+                    // road build on the main thread, unannounced, whose result the reconnect immediately made stale --
+                    // ActivateEndNodeConnection ends by asking for a build of its own. Two builds for one click, the
+                    // first of them thrown away and neither named in Background Tasks.
+                    //
+                    // Moved after the reconnect rather than converted in place, because the queued call returns before
+                    // it builds and the order mattered for a reason worth keeping: if the reconnect REFUSES -- either
+                    // spline under three nodes -- the connection is already broken and the road must still be rebuilt,
+                    // or it goes on drawing a connection that no longer exists. Asking afterwards covers both endings
+                    // with one build. Nothing the reconnect reads is produced by a build: it reads idOnSpline, node
+                    // positions and isSpecialEndNode, and the build path only ever reads that last one.
                     node1.spline.ActivateEndNodeConnection(node1, node2);
+                    // A cross-road connection sets isUpdateRequired on node1's road, which is not necessarily this
+                    // one. That covers the other road; this asks for the road the author is looking at. When they are
+                    // the same road the dispatcher's supersede collapses the two into one build.
+                    node.spline.road.RequestUpdate();
                 }
                 if (GUILayout.Button("Break road connection"))
                 {
+                    // B-14. The break alone changed no geometry, so the road went on drawing the connection until
+                    // something unrelated rebuilt it -- a control that looked dead because its effect was invisible.
+                    // Both roads are asked, because BreakConnection clears the special-node flags on both splines.
+                    // The counterpart is read first: BreakConnection nulls specialNodeCounterpart as it goes.
+                    SplineN counterpart = node.specialNodeCounterpart;
+                    Road otherRoad = null;
+                    if (counterpart != null && counterpart.spline != null) { otherRoad = counterpart.spline.road; }
                     node.specialNodeCounterpart.BreakConnection();
+                    node.spline.road.RequestUpdate();
+                    if (otherRoad != null && otherRoad != node.spline.road) { otherRoad.RequestUpdate(); }
                 }
                 if (GUILayout.Button("Access objects on other node"))
                 {

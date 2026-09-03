@@ -603,9 +603,24 @@ namespace RoadCityMaster.City.Editor
                     + " spline holding one destroyed node rebuilds the road forever", failures);
             }
 
+            // The last editor-side bypass, and the one control whose effect was invisible. SplineNEditor's "Update road
+            // connection" button ran UpdateRoad() inline between the break and the reconnect -- a throwaway build the
+            // reconnect immediately made stale -- and "Break road connection" rebuilt nothing at all, so the road went
+            // on drawing a connection the author had just removed. Both ask through the queue now.
+            string splineN = ReadSource("Scripts/Editor/SplineNEditor.cs");
+            if (splineN != null)
+            {
+                Expect(!AppearsInCode(splineN, "UpdateRoad(", out line),
+                    "SplineNEditor still calls UpdateRoad directly, so a connection edit builds on the main thread with"
+                    + " nothing named in Background Tasks", failures);
+                Expect(AppearsInCode(splineN, "RequestUpdate()", out line),
+                    "SplineNEditor's connection buttons ask for no rebuild, so breaking a connection leaves the road"
+                    + " drawing one that is gone", failures);
+            }
+
             measured.Append("  front door: RequestUpdate; legacy flags routed through it (isUpdateRequired guarded by"
                 + " !isDispatched, EditorUpdate debounce), TriggerSetup left only to ConstructionCleanup's PiggyBacks"
-                + " hop").Append('\n');
+                + " hop; SplineNEditor's two connection buttons ask through the queue").Append('\n');
 
             // The eight landmarks, in the order a road is built. Named by the mathematics they run rather than by the
             // stage that happens to hold them, because the stage boundaries are exactly what differs between the paths.
