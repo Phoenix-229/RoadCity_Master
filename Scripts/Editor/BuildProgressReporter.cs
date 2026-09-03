@@ -261,8 +261,10 @@ namespace RoadCityMaster
         /// <summary> Take an item out of the panel altogether, as opposed to finishing it with a status. Unity keeps a
         /// finished item visible until *Clear Inactive*; a removed one leaves nothing behind, which is what a build that
         /// was replaced before it ran should leave. Finish first when the item is still live, because Unity will not
-        /// remove a running item -- and swallow the throw either way, since the state this is trying to reach is exactly
-        /// "the item is gone". </summary>
+        /// remove a running item -- through <see cref="FinishSafe"/> rather than directly, so that there is one place in
+        /// this file that finishes an item and one place that carries the existence check it needs. That also means a
+        /// finish that throws no longer abandons the removal: the state being reached here is "the item is gone", and the
+        /// remove below is the half that actually reaches it. </summary>
         private static void RemoveSafe(int progressId)
         {
             try
@@ -270,7 +272,7 @@ namespace RoadCityMaster
                 if (!Progress.Exists(progressId)) { return; }
                 if (Progress.GetStatus(progressId) == Progress.Status.Running)
                 {
-                    Progress.Finish(progressId, Progress.Status.Canceled);
+                    FinishSafe(progressId, Progress.Status.Canceled);
                 }
                 if (Progress.Exists(progressId)) { Progress.Remove(progressId); }
             }

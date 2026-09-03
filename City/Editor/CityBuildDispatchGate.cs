@@ -453,30 +453,59 @@ namespace RoadCityMaster.City.Editor
             {
                 Expect(system.IndexOf("BuildDispatch.Shared.Pump", StringComparison.Ordinal) >= 0,
                     "nothing pumps the build queue, so a queued road would never be built", failures);
-                // RM-104 moved the subscription itself behind EngineIntegration, so RoadSystem.cs names no editor type
-                // at all and the old needle -- a literal `EditorApplication.update -= EditorPumpBuilds` in this file --
-                // can no longer be here to find. The defect the case hunts has not changed: an anonymous delegate
-                // cannot be matched by any later `-=`, because the `-=` writes a second, different closure, so every
-                // OnEnable adds a subscription no OnDisable can remove and a scene opened a dozen times ticks a dozen
-                // dead roads. What proves that is absent now is the pair -- a NAMED method handed over, and the token
-                // that came back handed to the removal -- together with the absence of the anonymous forms, which is
-                // the shape that used to be written here.
-                Expect(system.IndexOf("SubscribeEditorTick(EditorPumpBuilds)", StringComparison.Ordinal) >= 0,
+                // RM-109 moved the edit-mode driver out of this file altogether, and that move is what this case now
+                // asserts. The defect it hunts has not changed -- an anonymous delegate cannot be matched by any later
+                // `-=`, because the `-=` writes a second, different closure, so every OnEnable adds a subscription no
+                // OnDisable can remove and a scene opened a dozen times ticks a dozen dead pumps. What changed is where
+                // that can happen. A scene component is the wrong owner for a static queue for a reason that has
+                // nothing to do with delegates: it can be absent, disabled, loaded after the road that queued the
+                // build, or simply not sent the edit-mode message it subscribes from, and a driver that stops does not
+                // error -- the build sits at the head of the queue with its progress row live and its counter climbing.
+                // So the requirement here is the absence of an editor subscription in this file, and the presence of a
+                // play-mode guard on the pump it does own; the editor side is checked against its own owner below.
+                Expect(system.IndexOf("SubscribeEditorTick", StringComparison.Ordinal) < 0
+                    && system.IndexOf("EditorApplication", StringComparison.Ordinal) < 0,
+                    "RoadSystem.cs subscribes to an editor tick again. A scene component cannot own the driver of a"
+                    + " static queue: absent, disabled or loaded late, it stops pumping without erroring and every"
+                    + " queued build hangs at the head of the queue", failures);
+                Expect(system.IndexOf("if (!Application.isPlaying) { return; }", StringComparison.Ordinal) >= 0,
+                    "the pump this component owns is not confined to play mode, so play-in-editor is pumped by this"
+                    + " and by the editor driver both -- two phase transitions a frame in the editor against one in a"
+                    + " player, which is a build that progresses at a different rate in the two", failures);
+            }
+
+            // The editor-side owner. Static like the queue it drives, and reached from a domain load rather than from a
+            // scene, so no road's build can be blocked by the state, the ordering or the absence of anything in a scene.
+            string driver = ReadSource("Scripts/Editor/BuildPumpDriver.cs");
+            Expect(driver != null,
+                "Scripts/Editor/BuildPumpDriver.cs is gone, so nothing pumps the queue in edit mode and every queued"
+                + " build waits for a frame that never arrives", failures);
+            if (driver != null)
+            {
+                Expect(driver.IndexOf("[InitializeOnLoad]", StringComparison.Ordinal) >= 0,
+                    "the editor pump driver is never loaded, so it subscribes to nothing until something else happens"
+                    + " to touch the class", failures);
+                Expect(driver.IndexOf("EditorApplication.update += PumpEditorFrame", StringComparison.Ordinal) >= 0,
                     "the editor pump is subscribed by something other than a named method -- '-=' on an anonymous"
                     + " delegate removes a different instance than '+=' added and therefore removes nothing", failures);
-                Expect(system.IndexOf("UnsubscribeEditorTick(editorPumpToken)", StringComparison.Ordinal) >= 0,
-                    "nothing hands the subscription token back for removal, so the editor accumulates one dead pump"
-                    + " per domain reload", failures);
-                Expect(system.IndexOf("update += delegate", StringComparison.Ordinal) < 0
-                    && system.IndexOf("update += ()", StringComparison.Ordinal) < 0
-                    && system.IndexOf("SubscribeEditorTick(delegate", StringComparison.Ordinal) < 0
-                    && system.IndexOf("SubscribeEditorTick(()", StringComparison.Ordinal) < 0,
+                Expect(driver.IndexOf("EditorApplication.update -= PumpEditorFrame", StringComparison.Ordinal)
+                    < driver.IndexOf("EditorApplication.update += PumpEditorFrame", StringComparison.Ordinal)
+                    && driver.IndexOf("EditorApplication.update -= PumpEditorFrame", StringComparison.Ordinal) >= 0,
+                    "nothing detaches the same named method before attaching it, so a second initialisation leaves two"
+                    + " subscriptions pumping the same queue twice a frame", failures);
+                Expect(driver.IndexOf("update += delegate", StringComparison.Ordinal) < 0
+                    && driver.IndexOf("update += ()", StringComparison.Ordinal) < 0,
                     "the editor pump is subscribed as an anonymous delegate, which no later removal can match",
                     failures);
+                Expect(driver.IndexOf("Application.isPlaying", StringComparison.Ordinal) >= 0,
+                    "the editor driver pumps during play-in-editor as well, which with RoadSystem's own pump performs"
+                    + " two phase transitions a frame in the editor and one in a player", failures);
             }
 
             measured.Append("  modal bar: absent; runtime surface: IsGenerating, CurrentTask, CancelBuild, AdvanceBuild"
                 + " present\n");
+            measured.Append("  pump ownership: BuildPumpDriver in edit mode from a domain load, RoadSystem in play mode"
+                + " only, one owner per configuration\n");
         }
         #endregion
 

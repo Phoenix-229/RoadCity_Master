@@ -325,17 +325,46 @@ namespace RoadCityMaster
         /// `ArgumentException: You can only call GUI functions from inside OnGUI`. The first version of this case read
         /// it three times and the owner's restore read it once, which is where that exception came from. `GUI.skin` is
         /// also per-pass state that can differ between windows, so a value captured in one pass and put back in another
-        /// would be written onto the wrong skin. The last assertion below is what keeps it out: a source check that the
+        /// would be written onto the wrong skin. The FIRST assertion below is what keeps it out: a source check that the
         /// owner never mentions `GUI.skin` again. A `GUILayout.Label` that needs wrapping passes
         /// `EditorStyles.wordWrappedLabel` instead.
         ///
-        /// Skipped rather than failed when there is no skin. `EditorStyles.label` is null until the editor's skin
-        /// exists, and in that state Apply is a documented no-op, so there is nothing to prove either way. </summary>
+        /// Only the ROUND TRIP is skipped when there is no skin, and the source assertion runs ahead of the skip rather
+        /// than after it, which is the whole reason for that order: reading a file needs no skin, so the half of this
+        /// case that can run in batch mode does.
+        ///
+        /// `EditorStyles.label == null` was the test that stood where the skip is, and it never once ran. That property
+        /// returns a member of a static the editor fills in when it builds the skin and its getter does not check that
+        /// static first, so in `-batchmode -nographics` the read throws a NullReferenceException and the comparison
+        /// meant to prevent it never gets to evaluate. The throw came out of the guard line itself -- this gate reported
+        /// `threw 1` from the one line written to stop exactly that. The test is now
+        /// <see cref="InspectorTextLayout.SkinIsAvailable"/>, which probes instead of comparing. </summary>
         private static void CaseRoundTripRestores(StringBuilder builder, List<string> failures)
         {
-            if (EditorStyles.label == null)
+            // The source half runs FIRST because it is a file read and needs no skin, so it is the half that still
+            // proves something in batch mode. It is also what keeps the round trip below legal in the first place:
+            // whatever Apply sets, RestoreNow has to be able to put back off-pass, and GUI.skin is the member that
+            // cannot be.
+            string ownerPath = Path.Combine(InspectorConsistencyDocWriter.EditorScriptFolder(), Owner);
+            int skinReads = 0;
+            if (File.Exists(ownerPath))
             {
-                builder.Append("RCMSTYLE case5  skipped, this process has no editor skin\n");
+                string[] ownerLines = File.ReadAllLines(ownerPath);
+                for (int l = 0; l < ownerLines.Length; l++)
+                {
+                    if (WithoutComment(ownerLines[l]).Contains("GUI.skin")) { skinReads++; }
+                }
+            }
+            Expect(skinReads == 0, "case5: " + Owner + " reads GUI.skin on " + skinReads.ToString() + " line(s). The"
+                + " restore runs on delayCall, which is not a GUI callback, so that throws 'You can only call GUI"
+                + " functions from inside OnGUI' -- and GUI.skin is per-pass state, so a value captured in one pass"
+                + " would be put back onto whichever skin is current later. Pass EditorStyles.wordWrappedLabel to the"
+                + " GUILayout.Label that needs wrapping instead.", failures);
+
+            if (!InspectorTextLayout.SkinIsAvailable())
+            {
+                builder.Append("RCMSTYLE case5  owner GUI.skin reads ").Append(skinReads.ToString())
+                       .Append("  round trip skipped, this process has no editor skin\n");
                 return;
             }
 
@@ -366,28 +395,10 @@ namespace RoadCityMaster
                 + " back (" + EditorGUIUtility.labelWidth.ToString("F1") + "px instead of "
                 + widthWas.ToString("F1") + "px), so every inspector keeps this tool's column width.", failures);
 
-            // The owner may not set anything this restore cannot legally put back off-pass. GUI.skin is the one that
-            // bit: illegal outside OnGUI, and per-pass state even when it is legal.
-            string ownerPath = Path.Combine(InspectorConsistencyDocWriter.EditorScriptFolder(), Owner);
-            int skinReads = 0;
-            if (File.Exists(ownerPath))
-            {
-                string[] ownerLines = File.ReadAllLines(ownerPath);
-                for (int l = 0; l < ownerLines.Length; l++)
-                {
-                    if (WithoutComment(ownerLines[l]).Contains("GUI.skin")) { skinReads++; }
-                }
-            }
-            Expect(skinReads == 0, "case5: " + Owner + " reads GUI.skin on " + skinReads.ToString() + " line(s). The"
-                + " restore runs on delayCall, which is not a GUI callback, so that throws 'You can only call GUI"
-                + " functions from inside OnGUI' -- and GUI.skin is per-pass state, so a value captured in one pass"
-                + " would be put back onto whichever skin is current later. Pass EditorStyles.wordWrappedLabel to the"
-                + " GUILayout.Label that needs wrapping instead.", failures);
-
-            builder.Append("RCMSTYLE case5  editor's own wraps ").Append(labelWas ? "T" : "F")
+            builder.Append("RCMSTYLE case5  owner GUI.skin reads ").Append(skinReads.ToString())
+                   .Append("  editor's own wraps ").Append(labelWas ? "T" : "F")
                    .Append(miniWas ? "T" : "F")
-                   .Append("  column ").Append(widthWas.ToString("F0")).Append("px  round trip run, ")
-                   .Append("owner GUI.skin reads ").Append(skinReads.ToString()).Append("\n");
+                   .Append("  column ").Append(widthWas.ToString("F0")).Append("px  round trip run\n");
         }
         #endregion
 

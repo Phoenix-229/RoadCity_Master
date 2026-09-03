@@ -82,6 +82,15 @@ namespace RoadCityMaster
                     Exception inner = e is TargetInvocationException && e.InnerException != null ? e.InnerException : e;
                     builder.Append("RCMSUITE THREW  ").Append(typeName).Append(": ")
                            .Append(inner.GetType().Name).Append(": ").Append(inner.Message).Append("\n");
+                    // The same argument as the breadcrumb above, for the same reason. A gate that throws reports its
+                    // type and its message, and neither says WHERE -- a NullReferenceException with no frame costs a
+                    // whole batch cycle to place, and the cycle is minutes long. The stack goes to the console rather
+                    // than into the report so the report stays byte-identical between two runs (C-06): a path with a
+                    // line number in it is the one part of this that a refactor two files away can change.
+                    if (headless)
+                    {
+                        Debug.Log("RCMSUITE THREW-AT  " + typeName + "\n" + inner.StackTrace);
+                    }
                     continue;
                 }
 

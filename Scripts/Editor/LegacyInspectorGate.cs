@@ -443,31 +443,59 @@ namespace RoadCityMaster
         /// <summary> Each converted inspector applies what changed exactly once per repaint, inside a
         /// <c>GUI.changed</c> guard. Two apply calls in one pass is two undo steps for one gesture, and the reason that
         /// matters is not tidiness: a build takes a snapshot of the road, so an edit that undoes in halves can leave
-        /// geometry standing that was built from a combination of values the road never actually held. </summary>
+        /// geometry standing that was built from a combination of values the road never actually held.
+        ///
+        /// "Per repaint" is the whole of the claim, and counting every <c>ApplyModifiedProperties</c> in the file does
+        /// not measure it. An apply inside a button handler runs when the author presses the button and at no other
+        /// time, so it is a gesture in its own right and an undo step of its own is the correct outcome rather than the
+        /// fault -- <c>RoadEditor.ApplyClassToRoad</c> is exactly that, and it has to flush there, because this editor
+        /// reads its properties at the top of <c>OnInspectorGUI</c> and writes them back at the end, so a direct field
+        /// write in between would be overwritten by that write-back. Counting it as a second per-repaint apply asks for
+        /// that flush to be deleted, which would reintroduce the bug the flush is there to prevent.
+        ///
+        /// So the applies are classified rather than totalled: one reached from a <c>GUI.changed</c> guard, which is the
+        /// repaint path and must be single, and any others, which must each name their own undo step within a line or
+        /// two of the flush. That second requirement is what keeps this from being a hole -- a stray apply cannot be
+        /// dropped into a helper to escape the count, because an apply that records no undo entry fails the case
+        /// wherever it sits. </summary>
         private static void CaseOneGestureIsOneUndoStep(StringBuilder builder, List<string> failures)
         {
             string[] converted = { RoadFile, TerrainFile };
+            int commands = 0;
             for (int i = 0; i < converted.Length; i++)
             {
                 string[] lines = CodeLines(converted[i], failures);
-                int applies = 0;
-                bool guarded = false;
+                int onRepaintPath = 0;
                 for (int l = 0; l < lines.Length; l++)
                 {
                     if (!lines[l].Contains("ApplyModifiedProperties()")) { continue; }
-                    applies++;
+
+                    bool guarded = false;
                     for (int back = l; back >= 0 && back > l - 60; back--)
                     {
                         if (lines[back].Contains("if (GUI.changed)")) { guarded = true; break; }
                     }
+                    if (guarded) { onRepaintPath++; continue; }
+
+                    // Not on the repaint path: it has to be a command, and a command is a thing with an undo entry.
+                    bool recordsUndo = false;
+                    for (int on = l; on < lines.Length && on < l + 6; on++)
+                    {
+                        if (lines[on].Contains("Undo.Record")) { recordsUndo = true; break; }
+                    }
+                    Expect(recordsUndo, "undo: " + converted[i] + " applies its changes on line "
+                        + (l + 1) + ", outside any GUI.changed guard and with no"
+                        + " Undo.Record beside it, so that write belongs to whatever undo step happens to be open",
+                        failures);
+                    if (recordsUndo) { commands++; }
                 }
-                Expect(applies == 1, "undo: " + converted[i] + " applies its changes " + applies
+                Expect(onRepaintPath == 1, "undo: " + converted[i] + " applies its changes " + onRepaintPath
                     + " times per repaint; one gesture must be one undo step", failures);
-                Expect(guarded, "undo: " + converted[i] + " applies its changes outside a GUI.changed guard, so a "
-                    + "repaint with no edit still writes an undo step", failures);
             }
             builder.Append("RCMLEGACYUI ").Append("one-gesture-one-undo".PadRight(24))
-                   .Append("each converted inspector applies its edits once, when something changed\n");
+                   .Append("each converted inspector applies its edits once when something changed, plus ")
+                   .Append(commands)
+                   .Append(" command flushes that record their own undo step\n");
         }
         #endregion
 

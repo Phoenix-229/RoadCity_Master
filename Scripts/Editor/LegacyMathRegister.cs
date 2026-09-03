@@ -644,15 +644,20 @@ namespace RoadCityMaster
 
             r.Add(new LegacyMathRow("Scripts/Road.cs", "serialised design defaults",
                 "the values a newly created road starts with",
-                new string[] { "0.08f", "0.61f", "0.35f", "0.1f", "0.375f" },
+                new string[] { "3.25f", "0.08f", "0.61f", "0.35f", "0.1f", "0.375f" },
                 MathRole.Geometry, MathDisposition.Sourced,
-                "maxGrade 0.08, the K-rail base 0.61 m, desiredRampHeight 0.35 m, matchTerrainSubtraction 0.1 m, and "
-                + "RoadIntersection's gradeMod 0.375. The first two are the census's cleanest rows.",
-                "8% is inside AASHTO's 6-12% grade band for the terrain and design speeds this tool targets, and "
-                + "0.61 m is the AASHTO Roadside Design Guide F-shape concrete barrier base width, already cited at "
-                + "its site in Road.cs. The remaining three are author-editable defaults whose homes are the field "
-                + "census and the inspector registry, not a design standard -- gradeMod is a slider the intersection "
-                + "editor exposes over 0.01-2.",
+                "laneWidth 3.25 m, maxGrade 0.08, the K-rail base 0.61 m, desiredRampHeight 0.35 m, "
+                + "matchTerrainSubtraction 0.1 m, and RoadIntersection's gradeMod 0.375. The first three each cite a "
+                + "figure from outside the tool; the last three are the author's to set.",
+                "3.25 m is the UrbanTwoLane row of City.RoadClassDefaults, cited there, and UrbanTwoLane is the class "
+                + "every road is born declaring itself to be. RM-109 put it here in place of a 5 m initialiser: no "
+                + "travel lane is 5 m wide, and a road that disagreed with its own class had the disagreement read as "
+                + "an authored override by the preserving merge, so the 5 m survived every later class change and the "
+                + "road could not be talked out of it. 8% is inside AASHTO's 6-12% grade band for the terrain and "
+                + "design speeds this tool targets, and 0.61 m is the AASHTO Roadside Design Guide F-shape concrete "
+                + "barrier base width, already cited at its site in Road.cs. The remaining three are author-editable "
+                + "defaults whose homes are the field census and the inspector registry, not a design standard -- "
+                + "gradeMod is a slider the intersection editor exposes over 0.01-2.",
                 null));
 
             r.Add(new LegacyMathRow("Scripts/Construction2DRect.cs and Scripts/Construction3DTri.cs",

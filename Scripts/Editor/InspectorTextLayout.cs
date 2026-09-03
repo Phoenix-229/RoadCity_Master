@@ -79,6 +79,25 @@ namespace RoadCityMaster
 
 
         #region "Apply"
+        /// <summary> Whether there is an editor skin to read at all.
+        ///
+        /// `EditorStyles.label == null` looks like this test and is not one. That property returns a member of a static
+        /// the editor fills in when it builds the skin, and its getter does not check that static first, so in a process
+        /// that has never built one -- `-batchmode -nographics`, where `SystemInfo.graphicsDeviceType` is `Null` -- the
+        /// read throws a NullReferenceException from inside the getter instead of returning null. Every guard written as
+        /// a null comparison was therefore unreachable: the comparison never got the chance to run, and the throw came
+        /// out of the line that was supposed to prevent it.
+        ///
+        /// The probe is the only honest form this test has. The try/catch is not a swallowed failure: the exception IS
+        /// the answer, the one thing it can mean is that there is no skin, and the caller's response to both answers is
+        /// the same -- do nothing, because there is nothing to set and nothing to give back. </summary>
+        public static bool SkinIsAvailable()
+        {
+            try { return EditorStyles.label != null && EditorStyles.miniLabel != null; }
+            catch (System.NullReferenceException) { return false; }
+        }
+
+
         /// <summary> Lay this tool's text out for the drawing pass in progress: wrapped paragraphs, and a label column
         /// wide enough for the widest label the tool draws. Call it at the top of an `OnInspectorGUI` or `OnGUI`.
         ///
@@ -87,7 +106,7 @@ namespace RoadCityMaster
         /// wrapping three legacy files of 1265-2268 lines in a `using` block would mean reindenting all of them. </summary>
         public static void Apply()
         {
-            if (EditorStyles.label == null) { return; }   // no skin yet: nothing to set, nothing to give back
+            if (!SkinIsAvailable()) { return; }   // no skin yet: nothing to set, nothing to give back
 
             if (!captured)
             {
@@ -120,8 +139,9 @@ namespace RoadCityMaster
         /// `ArgumentException: You can only call GUI functions from inside OnGUI`. The first version of this file read
         /// `GUI.skin` and did exactly that. `EditorStyles.label`, `EditorStyles.miniLabel` and
         /// `EditorGUIUtility.labelWidth` are plain objects and a plain static, safe to read and write off-pass once the
-        /// skin exists -- which the `EditorStyles.label == null` guard below is what establishes. **Nothing that this
-        /// method cannot legally put back may be set in <see cref="Apply"/>.**
+        /// skin exists -- which <see cref="SkinIsAvailable"/> below is what establishes, and had to be written as a probe
+        /// rather than the null comparison that stood here, because the comparison threw instead of answering.
+        /// **Nothing that this method cannot legally put back may be set in <see cref="Apply"/>.**
         ///
         /// Public because the restore is the half of this that can actually be wrong, and a private one could only be
         /// checked by reading the source. <see cref="InspectorStyleOwnershipGate"/> calls it to prove that what Apply
@@ -133,7 +153,7 @@ namespace RoadCityMaster
             restoreArmed = false;
 
             if (!captured) { return; }
-            if (EditorStyles.label == null) { return; }
+            if (!SkinIsAvailable()) { return; }
 
             EditorStyles.label.wordWrap = labelWrapWas;
             EditorStyles.miniLabel.wordWrap = miniLabelWrapWas;
@@ -165,15 +185,22 @@ namespace RoadCityMaster
         /// and the label wraps, which is the case wrapping exists for. </summary>
         private static void WidenLabelColumn()
         {
+            // `currentViewWidth` is the inspector's width during a draw pass. It can be 0 or nonsense outside one, and a
+            // column computed from that would be worse than Unity's default, so bail rather than guess.
+            //
+            // This read comes FIRST, ahead of the measurement, and the order is a fix rather than tidying. `CalcSize`
+            // asks the text generator for the pixel width of a string, which needs the font and the GUI machinery a
+            // draw pass sets up. Off-pass it is at best work thrown away -- the figure would be discarded by the bail
+            // immediately below -- and in a `-batchmode -nographics` process, where the skin exists as data but nothing
+            // has ever been drawn, it dereferences what was never created and throws a NullReferenceException. With no
+            // pass running there is no width to fit a column to, so there is nothing to measure either.
+            float view = EditorGUIUtility.currentViewWidth;
+            if (view <= 1f) { return; }
+
             if (measured <= 0f)
             {
                 measured = EditorStyles.label.CalcSize(new GUIContent(WidestLabel)).x + 8f;
             }
-
-            // `currentViewWidth` is the inspector's width during a draw pass. It can be 0 or nonsense outside one, and a
-            // column computed from that would be worse than Unity's default, so bail rather than guess.
-            float view = EditorGUIUtility.currentViewWidth;
-            if (view <= 1f) { return; }
 
             // 120px is a usable colour swatch, object field or slider; below that the row stops being editable, which
             // is a worse fault than a wrapped label.

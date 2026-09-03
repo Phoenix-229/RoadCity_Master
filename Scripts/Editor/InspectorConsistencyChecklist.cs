@@ -184,7 +184,14 @@ namespace RoadCityMaster
 
         /// <summary> Files in <c>Scripts/Editor/</c> that are § 10's own tooling rather than an author's inspector. Each
         /// is listed individually: a pattern like "*Gate.cs" would silently absorb a future inspector that happened to be
-        /// called a gate. </summary>
+        /// called a gate.
+        ///
+        /// The test for membership is whether an author ever looks at the file's output, not whether the file is in the
+        /// editor assembly. That covers the gates, the suite runner, the field model, the audits, the porting operators
+        /// and the document writers, and it also covers two shapes that are neither: <c>BuildPumpDriver.cs</c>, which is
+        /// a static frame source with no GUI of any kind, and <c>InspectorTextLayout.cs</c>, which draws nothing itself
+        /// -- it sets the wrap flags and the label-column width that the fourteen files below then draw THROUGH. A
+        /// conversion state for either would be a row about a file with no inspector to convert. </summary>
         private static readonly string[] _notAuthorFacing =
         {
             "ApproachMatchGate.cs",
@@ -192,6 +199,7 @@ namespace RoadCityMaster
             "AssetIdentityGate.cs",
             "AssetIdentityRegister.cs",
             "BuildProgressReporter.cs",
+            "BuildPumpDriver.cs",
             "CompileGate.cs",
             "CompileLogReading.cs",
             "CrossSectionProfileGate.cs",
@@ -210,6 +218,8 @@ namespace RoadCityMaster
             "InspectorFieldRegistry.cs",
             "InspectorFoldoutState.cs",
             "InspectorMetadataGate.cs",
+            "InspectorStyleOwnershipGate.cs",
+            "InspectorTextLayout.cs",
             "LaneSectionGate.cs",
             "LegacyInspectorGate.cs",
             "LegacyInspectorShell.cs",
