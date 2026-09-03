@@ -60,6 +60,27 @@ namespace RoadCityMaster
 
             EditorGUILayout.LabelField("Short description (optional):");
             desc = EditorGUILayout.TextArea(desc, GUILayout.Height(40f));
+
+            // B-19. B-14. This one stays per-keystroke, and it is the second and last place in the tool where that is
+            // the right answer.
+            //
+            // B-19 removed per-keystroke commits because of what they cost: a value written on every letter rebuilt the
+            // road from a half-typed number, wrote an undo step per letter, and was re-read from under the author by the
+            // next serializedObject.Update(). None of those exist here. `displayName` is a private field of this window,
+            // not a serialised property; nothing is applied, no undo entry is recorded, and no road is rebuilt. The
+            // whole per-keystroke cost is one Regex.Replace in SanitizeFilename and one File.Exists.
+            //
+            // And what it buys is the only thing this window does. The two readouts below -- "File exists already!" and
+            // the full save path -- both read `fileName`, which SanitizeFilename derives from this value. They exist to
+            // tell an author, before they press Save, exactly which file they are about to write and whether something
+            // is already there. Deferred to focus-out, an author typing "TunnelRail" would read a path ending
+            // DefaultName.rao and an existence warning about a file they are not saving, right up until they clicked
+            // away -- a wrong answer where the window's entire purpose is to give the right one.
+            //
+            // <see cref="LegacyInspectorGate"/> case 10 records exactly TWO immediate controls in exactly this file:
+            // this one, and the description area above it -- free text that nothing reads until Save is pressed, so
+            // deferring it would buy nothing to pay for. Converting this window to deferred commits, or adding a THIRD
+            // immediate control to it, fails the gate rather than passing quietly under this comment.
             displayName2 = EditorGUILayout.TextField("Display name:", displayName);
             if (string.Compare(displayName2, displayName) != 0)
             {

@@ -262,6 +262,20 @@ namespace RoadCityMaster
                         ShowBridge();
                     }
 
+                    // B-19. B-14. These four stay immediate, and that is a decision rather than an oversight -- the one
+                    // place in the tool where a raw slider is still the right control.
+                    //
+                    // B-19 exists because a value committed per keystroke rebuilt the road on every keystroke, wrote an
+                    // undo step per keystroke, and re-read the property from under the author mid-typing. None of the
+                    // three can happen here: `cameraZoomFactor`, `cameraHeightOffset` and `customCameraRotation` are
+                    // fields on this Editor, not on the RoadSystem -- nothing serialises them, nothing rebuilds from
+                    // them, no undo step is recorded, and the only thing they touch is where the editor's play camera is
+                    // standing. Deferring them to mouse-up would mean dragging a zoom slider blind and seeing the frame
+                    // jump once when the button comes up, which is worse at the only job these controls have.
+                    //
+                    // <see cref="LegacyInspectorGate"/> allows exactly four of them in exactly this file, so a fifth --
+                    // or one of these moved onto a value the road is built from -- fails the gate rather than passing
+                    // quietly under this comment.
                     float changeChecker = EditorGUILayout.Slider("Zoom factor:", cameraZoomFactor, 0.02f, 10f);
                     if (!RootUtils.IsApproximately(changeChecker, cameraZoomFactor, 0.001f))
                     {

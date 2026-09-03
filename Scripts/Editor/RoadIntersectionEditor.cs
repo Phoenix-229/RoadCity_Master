@@ -51,6 +51,12 @@ namespace RoadCityMaster
         private SerializedProperty intersectionStopType;
         private SerializedProperty lightType;
 
+        /// <summary> B-19. This inspector's own deferred-commit controls. One per Editor instance, because the pending
+        /// text of a half-typed light length belongs to the inspector it is being typed into. Reset at the top of every
+        /// pass by <see cref="FocusOutFields.BeginFrame"/>, and read once after drawing, beside GUI.changed, to decide
+        /// whether anything is there to apply. </summary>
+        private readonly FocusOutFields fields = new FocusOutFields();
+
 
         #region "Editor only variables"
         //Editor only variables
@@ -167,6 +173,7 @@ namespace RoadCityMaster
             }
 
             serializedObject.Update();
+            fields.BeginFrame();
 
             // RM-109. B-3, B-4. Per repaint, and given back on the next tick -- not once from Init() into settings the
             // whole editor shares.
@@ -266,8 +273,14 @@ namespace RoadCityMaster
                 if (intersection.lightType == RoadIntersection.LightTypeEnum.Timed)
                 {
                     EditorGUILayout.LabelField("Traffic light fixed time lengths (in seconds):");
+                    // B-19. All four of these were raw sliders writing the property on every frame of a drag, which is
+                    // a signal timing rewritten thirty times a second and an undo stack with thirty entries in it for
+                    // one gesture. Through the deferred control the handle moves freely, the number beside it greys to
+                    // say "not committed yet", and the property is written once -- when the button comes up, or when a
+                    // typed number is confirmed with Enter or by moving focus away. The reset buttons keep their place
+                    // on the value's row: the control opens its own horizontal group inside this one.
                     EditorGUILayout.BeginHorizontal();
-                    fixedTimeRegularLightLength.floatValue = EditorGUILayout.Slider("Green length: ", intersection.fixedTimeRegularLightLength, 0.1f, 180f);
+                    fields.FloatSlider(fixedTimeRegularLightLength, "Green length: ", 0.1f, 180f);
                     if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
                         fixedTimeRegularLightLength.floatValue = 30f;
@@ -277,7 +290,7 @@ namespace RoadCityMaster
                     if (intersection.roadType != RoadIntersection.RoadTypeEnum.NoTurnLane)
                     {
                         EditorGUILayout.BeginHorizontal();
-                        fixedTimeLeftTurnLightLength.floatValue = EditorGUILayout.Slider("Left turn only length: ", intersection.fixedTimeLeftTurnLightLength, 0.1f, 180f);
+                        fields.FloatSlider(fixedTimeLeftTurnLightLength, "Left turn only length: ", 0.1f, 180f);
                         if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                         {
                             fixedTimeLeftTurnLightLength.floatValue = 10f;
@@ -286,7 +299,7 @@ namespace RoadCityMaster
                     }
 
                     EditorGUILayout.BeginHorizontal();
-                    fixedTimeAllRedLightLength.floatValue = EditorGUILayout.Slider("All red length: ", intersection.fixedTimeAllRedLightLength, 0.1f, 180f);
+                    fields.FloatSlider(fixedTimeAllRedLightLength, "All red length: ", 0.1f, 180f);
                     if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
                         fixedTimeAllRedLightLength.floatValue = 1f;
@@ -294,7 +307,7 @@ namespace RoadCityMaster
                     EditorGUILayout.EndHorizontal();
 
                     EditorGUILayout.BeginHorizontal();
-                    fixedTimeYellowLightLength.floatValue = EditorGUILayout.Slider("Yellow light length: ", intersection.fixedTimeYellowLightLength, 0.1f, 180f);
+                    fields.FloatSlider(fixedTimeYellowLightLength, "Yellow light length: ", 0.1f, 180f);
                     if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
                         fixedTimeYellowLightLength.floatValue = 3f;
@@ -340,7 +353,7 @@ namespace RoadCityMaster
                 {
                     //Option: Street light range:
                     EditorGUILayout.BeginHorizontal();
-                    streetLightRange.floatValue = EditorGUILayout.Slider("  Street light range: ", intersection.streetLightRange, 1f, 128f);
+                    fields.FloatSlider(streetLightRange, "  Street light range: ", 1f, 128f);
                     if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
                         streetLightRange.floatValue = 30f;
@@ -349,7 +362,7 @@ namespace RoadCityMaster
 
                     //Option: Street light intensity:
                     EditorGUILayout.BeginHorizontal();
-                    streetLightIntensity.floatValue = EditorGUILayout.Slider("  Street light intensity: ", intersection.streetLightIntensity, 0f, 8f);
+                    fields.FloatSlider(streetLightIntensity, "  Street light intensity: ", 0f, 8f);
                     if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
                         streetLightIntensity.floatValue = 1f;
@@ -386,7 +399,11 @@ namespace RoadCityMaster
                 //Option: Traffic light scaling sensitivity:
                 EditorGUILayout.LabelField("Traffic light scaling sensitivity: *Does not auto-update");
                 EditorGUILayout.BeginHorizontal();
-                scalingSense.floatValue = EditorGUILayout.Slider(intersection.scalingSense, 0f, 200f);
+                // B-19. The raw control here was the label-less `Slider(value, min, max)` overload, with the heading
+                // above it standing in for a label. The deferred control always draws a prefix label -- so rather than
+                // pass an empty one and leave an unexplained gap where the label column is, the value gets a short name
+                // of its own and the heading above keeps the sentence that does not fit in a label column.
+                fields.FloatSlider(scalingSense, "  Sensitivity:", 0f, 200f);
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     scalingSense.floatValue = 170f;
@@ -414,7 +431,8 @@ namespace RoadCityMaster
             EditorGUILayout.LabelField("Grade correction factor: *Does not auto-update");
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.BeginHorizontal();
-            gradeMod.floatValue = EditorGUILayout.Slider(intersection.gradeMod, 0.01f, 2f);
+            // B-19. Same as the sensitivity slider above: a short label of its own, the explanation left in the heading.
+            fields.FloatSlider(gradeMod, "  Factor:", 0.01f, 2f);
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 gradeMod.floatValue = 0.375f;
@@ -477,7 +495,7 @@ namespace RoadCityMaster
             //		}
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(markerCenter1, new GUIContent("  Mat #1: "));
+            fields.Property(markerCenter1, new GUIContent("  Mat #1: "));
             if (intersection.markerCenter1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 intersection.markerCenter1 = null;
@@ -487,7 +505,7 @@ namespace RoadCityMaster
             if (intersection.markerCenter1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(markerCenter2, new GUIContent("  Mat #2: "));
+                fields.Property(markerCenter2, new GUIContent("  Mat #2: "));
                 if (intersection.markerCenter2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.markerCenter2 = null;
@@ -497,7 +515,7 @@ namespace RoadCityMaster
             if (intersection.markerCenter2 != null && intersection.markerCenter1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(markerCenter3, new GUIContent("  Mat #3: "));
+                fields.Property(markerCenter3, new GUIContent("  Mat #3: "));
                 if (intersection.markerCenter3 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.markerCenter3 = null;
@@ -526,7 +544,7 @@ namespace RoadCityMaster
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(markerExtStretch1, new GUIContent("  Mat #1: "));
+            fields.Property(markerExtStretch1, new GUIContent("  Mat #1: "));
             if (intersection.markerExtStretch1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 intersection.markerExtStretch1 = null;
@@ -536,7 +554,7 @@ namespace RoadCityMaster
             if (intersection.markerExtStretch1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(markerExtStretch2, new GUIContent("  Mat #2: "));
+                fields.Property(markerExtStretch2, new GUIContent("  Mat #2: "));
                 if (intersection.markerExtStretch2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.markerExtStretch2 = null;
@@ -546,7 +564,7 @@ namespace RoadCityMaster
             if (intersection.markerExtStretch2 != null && intersection.markerExtStretch1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(markerExtStretch3, new GUIContent("  Mat #3: "));
+                fields.Property(markerExtStretch3, new GUIContent("  Mat #3: "));
                 if (intersection.markerExtStretch3 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.markerExtStretch3 = null;
@@ -576,7 +594,7 @@ namespace RoadCityMaster
             GUILayout.Space(4f);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(markerExtTiled1, new GUIContent("  Mat #1: "));
+            fields.Property(markerExtTiled1, new GUIContent("  Mat #1: "));
             if (intersection.markerExtTiled1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 intersection.markerExtTiled1 = null;
@@ -586,7 +604,7 @@ namespace RoadCityMaster
             if (intersection.markerExtTiled1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(markerExtTiled2, new GUIContent("  Mat #2: "));
+                fields.Property(markerExtTiled2, new GUIContent("  Mat #2: "));
                 if (intersection.markerExtTiled2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.markerExtTiled2 = null;
@@ -596,7 +614,7 @@ namespace RoadCityMaster
             if (intersection.markerExtTiled2 != null && intersection.markerExtTiled1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(markerExtTiled3, new GUIContent("  Mat #3: "));
+                fields.Property(markerExtTiled3, new GUIContent("  Mat #3: "));
                 if (intersection.markerExtTiled3 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.markerExtTiled3 = null;
@@ -626,7 +644,7 @@ namespace RoadCityMaster
             GUILayout.Space(4f);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(lane0Mat1, new GUIContent("Lane section 0 mat #1:"));
+            fields.Property(lane0Mat1, new GUIContent("Lane section 0 mat #1:"));
             if (intersection.lane0Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 intersection.lane0Mat1 = null;
@@ -635,7 +653,7 @@ namespace RoadCityMaster
             if (intersection.lane0Mat1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(lane0Mat2, new GUIContent("Lane section 0 mat #2:"));
+                fields.Property(lane0Mat2, new GUIContent("Lane section 0 mat #2:"));
                 if (intersection.lane0Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.lane0Mat2 = null;
@@ -646,7 +664,7 @@ namespace RoadCityMaster
 
             //Option: Lane section 1:
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(lane1Mat1, new GUIContent("Lane section 1 mat #1:"));
+            fields.Property(lane1Mat1, new GUIContent("Lane section 1 mat #1:"));
             if (intersection.lane1Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 intersection.lane1Mat1 = null;
@@ -655,7 +673,7 @@ namespace RoadCityMaster
             if (intersection.lane1Mat1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(lane1Mat2, new GUIContent("Lane section 1 mat #2:"));
+                fields.Property(lane1Mat2, new GUIContent("Lane section 1 mat #2:"));
                 if (intersection.lane1Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.lane1Mat2 = null;
@@ -667,7 +685,7 @@ namespace RoadCityMaster
             if (intersection.roadType == RoadIntersection.RoadTypeEnum.BothTurnLanes || intersection.roadType == RoadIntersection.RoadTypeEnum.TurnLane)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(lane2Mat1, new GUIContent("Lane section 2 mat #1:"));
+                fields.Property(lane2Mat1, new GUIContent("Lane section 2 mat #1:"));
                 if (intersection.lane2Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.lane2Mat1 = null;
@@ -676,7 +694,7 @@ namespace RoadCityMaster
                 if (intersection.lane2Mat1 != null)
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PropertyField(lane2Mat2, new GUIContent("Lane section 2 mat #2:"));
+                    fields.Property(lane2Mat2, new GUIContent("Lane section 2 mat #2:"));
                     if (intersection.lane2Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
                         intersection.lane2Mat2 = null;
@@ -690,7 +708,7 @@ namespace RoadCityMaster
             if (intersection.roadType == RoadIntersection.RoadTypeEnum.BothTurnLanes)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(lane3Mat1, new GUIContent("Lane section 3 mat #1:"));
+                fields.Property(lane3Mat1, new GUIContent("Lane section 3 mat #1:"));
                 if (intersection.lane3Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     intersection.lane3Mat1 = null;
@@ -699,7 +717,7 @@ namespace RoadCityMaster
                 if (intersection.lane3Mat1 != null)
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PropertyField(lane3Mat2, new GUIContent("Lane section 3 mat #2:"));
+                    fields.Property(lane3Mat2, new GUIContent("Lane section 3 mat #2:"));
                     if (intersection.lane3Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
                         intersection.lane3Mat2 = null;
@@ -848,7 +866,12 @@ namespace RoadCityMaster
             bool isMaterialChanged = false;
             bool isRoadUpdate = false;
 
-            if (GUI.changed)
+            // B-19. `fields.Changed` belongs in this test and is not belt-and-braces. A deferred control commits on the
+            // frame the author presses Enter, moves focus away, or lets a slider handle go -- and on that frame no Unity
+            // control reported a change, so GUI.changed is false. Gating this block on GUI.changed alone would skip
+            // ApplyModifiedProperties() on exactly the frame that had something to apply, and the next
+            // serializedObject.Update() would put the old value back over the committed one.
+            if (GUI.changed || fields.Changed)
             {
                 //Option: Gizmo:
                 if (isDrawingGizmo.boolValue != intersection.isDrawingGizmo)

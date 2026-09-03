@@ -138,21 +138,25 @@ namespace RoadCityMaster
         /// the RM-51 foldouts and are drawn by group. A few are gated on a neighbouring toggle -- a shoulder width
         /// only means something once shoulders are switched on -- and hiding them when the toggle is off is knowledge
         /// worth keeping, so those stay at their old position, beside the toggle that governs them, and come through
-        /// here instead. </summary>
-        public static bool Field(SerializedObject so, string componentType, string field)
+        /// here instead.
+        ///
+        /// <paramref name="fields"/> is the inspector's own commit buffer (B-19); it is passed straight down to the
+        /// drawer, which is where the rule lives. </summary>
+        public static bool Field(SerializedObject so, string componentType, string field, FocusOutFields fields)
         {
-            return Field(so, componentType, field, null);
+            return Field(so, componentType, field, fields, null);
         }
 
 
         /// <summary> The same field with a control of the inspector's own on the value's row -- in practice the legacy
         /// reset-to-default icon button, which the inspector still owns because the default it writes is the road's,
         /// not the registry's. </summary>
-        public static bool Field(SerializedObject so, string componentType, string field, System.Action trailing)
+        public static bool Field(SerializedObject so, string componentType, string field, FocusOutFields fields,
+            System.Action trailing)
         {
             FieldDescriptor d = Descriptor(componentType, field);
             if (d == null) { return false; }
-            return InspectorFieldDrawer.Draw(so, d, trailing);
+            return InspectorFieldDrawer.Draw(so, d, fields, trailing);
         }
 
 
@@ -161,9 +165,9 @@ namespace RoadCityMaster
         /// message. Returns how many fields were drawn -- zero for a group this component has no fields in, in which
         /// case no foldout is drawn either. The open/closed state is <see cref="InspectorFoldoutState"/>'s, so it is
         /// remembered between selections and shared with the modern inspectors. </summary>
-        public static int Group(SerializedObject so, string componentType, FieldGroup group)
+        public static int Group(SerializedObject so, string componentType, FieldGroup group, FocusOutFields fields)
         {
-            return Group(so, componentType, group, null);
+            return Group(so, componentType, group, fields, null);
         }
 
 
@@ -171,7 +175,8 @@ namespace RoadCityMaster
         /// draws itself, at their own position, because a neighbouring toggle governs whether they appear at all. They
         /// still go through the drawer (see <see cref="Field"/>); what <paramref name="skip"/> prevents is drawing them
         /// a SECOND time here, which would leave one value under two controls in one inspector. </summary>
-        public static int Group(SerializedObject so, string componentType, FieldGroup group, string[] skip)
+        public static int Group(SerializedObject so, string componentType, FieldGroup group, FocusOutFields fields,
+            string[] skip)
         {
             if (so == null || string.IsNullOrEmpty(componentType)) { return 0; }
 
@@ -194,7 +199,7 @@ namespace RoadCityMaster
             EditorGUI.indentLevel++;
             for (int i = 0; i < ofGroup.Count; i++)
             {
-                if (InspectorFieldDrawer.Draw(so, ofGroup[i])) { drawn++; }
+                if (InspectorFieldDrawer.Draw(so, ofGroup[i], fields)) { drawn++; }
             }
             EditorGUI.indentLevel--;
             return drawn;
@@ -219,20 +224,27 @@ namespace RoadCityMaster
 
         /// <summary> Every group this component has fields in, in the order the groups are declared: what it is, what it
         /// looks like, what it does to the world, what is generated from it. </summary>
-        public static int AllGroups(SerializedObject so, string componentType)
+        public static int AllGroups(SerializedObject so, string componentType, FocusOutFields fields)
         {
-            return AllGroups(so, componentType, null);
+            return AllGroups(so, componentType, fields, null);
         }
 
 
-        /// <summary> Every group, minus the fields the inspector draws at their own position. </summary>
-        public static int AllGroups(SerializedObject so, string componentType, string[] skip)
+        /// <summary> Every group, minus the fields the inspector draws at their own position.
+        ///
+        /// B-19. <paramref name="fields"/> is threaded through here rather than left out, and leaving it out was a real
+        /// fault rather than a tidiness point. The four foldouts draw the MAJORITY of a component's registry fields --
+        /// only the handful gated on a neighbouring toggle come through <see cref="Field"/> -- so an AllGroups that
+        /// could not reach the caller's commit buffer would have handed <see cref="InspectorFieldDrawer.Draw"/> a null
+        /// one, and every field in every foldout would still have committed per keystroke while the four in-place
+        /// fields did not. B-19 would have been true of the exceptions and false of the rule. </summary>
+        public static int AllGroups(SerializedObject so, string componentType, FocusOutFields fields, string[] skip)
         {
             int drawn = 0;
-            drawn += Group(so, componentType, FieldGroup.WhatItIs, skip);
-            drawn += Group(so, componentType, FieldGroup.WhatItLooksLike, skip);
-            drawn += Group(so, componentType, FieldGroup.WhatItDoesToTheWorld, skip);
-            drawn += Group(so, componentType, FieldGroup.WhatIsGeneratedFromIt, skip);
+            drawn += Group(so, componentType, FieldGroup.WhatItIs, fields, skip);
+            drawn += Group(so, componentType, FieldGroup.WhatItLooksLike, fields, skip);
+            drawn += Group(so, componentType, FieldGroup.WhatItDoesToTheWorld, fields, skip);
+            drawn += Group(so, componentType, FieldGroup.WhatIsGeneratedFromIt, fields, skip);
             return drawn;
         }
 

@@ -188,10 +188,14 @@ namespace RoadCityMaster
         ///
         /// The test for membership is whether an author ever looks at the file's output, not whether the file is in the
         /// editor assembly. That covers the gates, the suite runner, the field model, the audits, the porting operators
-        /// and the document writers, and it also covers two shapes that are neither: <c>BuildPumpDriver.cs</c>, which is
-        /// a static frame source with no GUI of any kind, and <c>InspectorTextLayout.cs</c>, which draws nothing itself
-        /// -- it sets the wrap flags and the label-column width that the fourteen files below then draw THROUGH. A
-        /// conversion state for either would be a row about a file with no inspector to convert. </summary>
+        /// and the document writers, and it also covers three shapes that are none of those: <c>BuildPumpDriver.cs</c>,
+        /// which is a static frame source with no GUI of any kind, <c>InspectorTextLayout.cs</c>, which draws nothing
+        /// itself -- it sets the wrap flags and the label-column width that the fourteen files below then draw THROUGH
+        /// -- and <c>FocusOutFields.cs</c> (B-19), which is the same shape one level down: it is the CONTROL an author
+        /// types into, but it owns no layout, no grouping and no component of its own, and the units and inline
+        /// constraints it shows are the descriptor's, handed to it by <c>InspectorFieldDrawer</c>. Asking it for the
+        /// five criteria would be asking a text field to persist a foldout. A conversion state for any of the three
+        /// would be a row about a file with no inspector to convert. </summary>
         private static readonly string[] _notAuthorFacing =
         {
             "ApproachMatchGate.cs",
@@ -208,6 +212,7 @@ namespace RoadCityMaster
             "DividedCarriagewayGate.cs",
             "Documentation.cs",
             "FlarePortOperator.cs",
+            "FocusOutFields.cs",
             "HierarchyConnectionMarker.cs",
             "HierarchyMarkerGate.cs",
             "InspectorConsistencyChecklist.cs",

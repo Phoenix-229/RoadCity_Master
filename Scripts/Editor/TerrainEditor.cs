@@ -68,6 +68,11 @@ namespace RoadCityMaster
         /// Bound once, in <see cref="OnEnable"/>. </summary>
         private System.Action resetSplatWidth;
 
+        /// <summary> B-19. This inspector's own deferred-commit controls: a splat width typed here reaches the property
+        /// when the author presses Enter or moves focus away, not on the keystroke. One per Editor instance, reset by
+        /// <see cref="FocusOutFields.BeginFrame"/> at the top of every pass. </summary>
+        private readonly FocusOutFields fields = new FocusOutFields();
+
 
         private void OnEnable()
         {
@@ -100,6 +105,7 @@ namespace RoadCityMaster
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
+            fields.BeginFrame();
             if(!isInitialized)
             {
                 isInitialized = true;
@@ -179,8 +185,8 @@ namespace RoadCityMaster
             // number behind their back. They stay HERE, under the match-resolution popup, rather than moving into a
             // foldout: the popup above writes into these two properties, and a value whose control sits in a
             // collapsed group somewhere else cannot be seen changing.
-            LegacyInspectorShell.Field(serializedObject, "RoadTerrain", "splatResoWidth");
-            LegacyInspectorShell.Field(serializedObject, "RoadTerrain", "splatResoHeight");
+            LegacyInspectorShell.Field(serializedObject, "RoadTerrain", "splatResoWidth", fields);
+            LegacyInspectorShell.Field(serializedObject, "RoadTerrain", "splatResoHeight", fields);
 
 
             //Splat background color input:
@@ -208,7 +214,7 @@ namespace RoadCityMaster
             // relation to anything real -- a 2 cm splat stripe is invisible and a 256 m one paints a quarter of a
             // terrain tile per road. Through the drawer it carries the registry's real-world band and says so when
             // the value leaves it. It keeps its default button, on the value's own row, via the trailing overload.
-            LegacyInspectorShell.Field(serializedObject, "RoadTerrain", "splatWidth", resetSplatWidth);
+            LegacyInspectorShell.Field(serializedObject, "RoadTerrain", "splatWidth", fields, resetSplatWidth);
 
             //Skip bridges:
             isSkippingBridges.boolValue = EditorGUILayout.Toggle("Skip bridges: ", terrain.isSplatSkipBridges);
@@ -238,7 +244,11 @@ namespace RoadCityMaster
             }
             GUILayout.Space(10f);
 
-            if (GUI.changed)
+            // B-19. `fields.Changed` is not redundant beside GUI.changed. A deferred control commits on the frame the
+            // author presses Enter, moves focus away, or lets a slider handle go, and on that frame no Unity control
+            // reported a change -- so GUI.changed is false and this block would skip the one apply that had work to do,
+            // losing the committed value at the next Update().
+            if (GUI.changed || fields.Changed)
             {
                 serializedObject.ApplyModifiedProperties();
                 //Necessary?

@@ -60,6 +60,15 @@ namespace RoadCityMaster
 
         //Checkers:
         private Splination.SplinatedMeshMaker SMM = null;
+
+        /// <summary> B-19. This inspector's own deferred-commit controls. One per Editor instance: the pending text of a
+        /// half-typed extrusion offset belongs to the node it is being typed on. Reset at the top of every pass by
+        /// <see cref="FocusOutFields.BeginFrame"/>, and read once beside GUI.changed to decide whether the extrusion and
+        /// edge objects have to be rebuilt -- which on this inspector is the expensive part: the old code re-ran
+        /// SplinatedMeshMaker.Setup for every object on the node on every frame a slider was being dragged.
+        /// Control names carry the list index, because two extrusions on one node draw the same fields. </summary>
+        private readonly FocusOutFields fields = new FocusOutFields();
+
         private EndObjectsDefaultsEnum endObjectAdd = EndObjectsDefaultsEnum.None;
         private SMMDefaultsEnum SMMQuickAdd = SMMDefaultsEnum.None;
         private BridgeTopBaseDefaultsEnum BridgeTopBaseQuickAdd = BridgeTopBaseDefaultsEnum.None;
@@ -307,6 +316,8 @@ namespace RoadCityMaster
 
         public override void OnInspectorGUI()
         {
+            fields.BeginFrame();
+
             #region "Event"
             if (Event.current.type == EventType.ValidateCommand)
             {
@@ -460,7 +471,12 @@ namespace RoadCityMaster
             DoStats();
             EditorGUILayout.EndVertical();
 
-            if (GUI.changed)
+            // B-19. `fields.Changed` has to be part of this test, and on this inspector it is the whole of the fix. A
+            // deferred control commits on the frame the author presses Enter, moves focus away, or lets a slider handle
+            // go -- and on that frame no Unity control reported a change, so GUI.changed is false. Without this term the
+            // committed value would never reach UpdateSplineObjects()/UpdateEdgeObjects() below, and the extrusion the
+            // author just resized would keep its old geometry until something else happened to dirty the inspector.
+            if (GUI.changed || fields.Changed)
             {
                 //Set snapshot for undo:
                 Undo.RecordObject(node, "Modify node");
@@ -718,6 +734,11 @@ namespace RoadCityMaster
                 currentCount += 1;
                 SMM = node.SplinatedObjects[index];
 
+                // B-19. Every deferred control needs a name unique to the value AND to the entry it belongs to: two
+                // extrusions on one node draw the same fields, and a shared name would show a half-typed number from
+                // #2 sitting in #1's box. The list position is what tells them apart.
+                string key = "smm" + index.ToString() + "#";
+
                 //RoadCityMaster.Splination.AxisTypeEnum tAxisTypeSpline = RoadCityMaster.Splination.AxisTypeEnum.Z;
                 EditorGUILayout.BeginVertical("TextArea");
 
@@ -765,7 +786,8 @@ namespace RoadCityMaster
 
                 EditorGUILayout.BeginVertical("box");
                 //Name:
-                SMM.objectName = EditorGUILayout.TextField("Name:", SMM.objectName);
+                fields.StringField("Name:", key + "name", ref SMM.objectName,
+                    "The name this extrusion is listed under, and the name given to the mesh object it builds.");
 
                 //Game object (prefab):
                 SMM.currentSplination = (GameObject)EditorGUILayout.ObjectField("Prefab:", SMM.currentSplination, typeof(GameObject), false);
@@ -775,7 +797,8 @@ namespace RoadCityMaster
                 //Prefab start cap height offset:
                 if (SMM.currentSplinationCap1 != null)
                 {
-                    SMM.capHeightOffset1 = EditorGUILayout.FloatField("  Height offset:", SMM.capHeightOffset1);
+                    fields.FloatField("  Height offset:", key + "cap1", ref SMM.capHeightOffset1,
+                        "Metres to raise or lower the start cap relative to the extrusion it caps.");
                 }
 
                 //Game object (prefab end cap):
@@ -783,7 +806,8 @@ namespace RoadCityMaster
                 //Prefab end cap height offset:
                 if (SMM.currentSplinationCap2 != null)
                 {
-                    SMM.capHeightOffset2 = EditorGUILayout.FloatField("  Height offset:", SMM.capHeightOffset2);
+                    fields.FloatField("  Height offset:", key + "cap2", ref SMM.capHeightOffset2,
+                        "Metres to raise or lower the end cap relative to the extrusion it caps.");
                 }
 
                 //Material overrides:
@@ -808,7 +832,13 @@ namespace RoadCityMaster
                 }
                 EditorGUILayout.BeginHorizontal();
 
-                SMM.StartTime = EditorGUILayout.Slider("Start param: ", SMM.StartTime, node.minSplination, node.maxSplination - 0.01f);
+                // B-19. Start and end param drive the extrusion's length, and length is what SplinatedMeshMaker.Setup
+                // rebuilds from -- so a dragged handle used to regenerate the whole extrusion mesh on every mouse-move
+                // frame. The handle still slides freely; the value it reports arrives once, when the button comes up.
+                // The "match node" buttons below need no change: a clicked GUILayout.Button sets GUI.changed itself.
+                fields.FloatSlider("Start param: ", key + "start", ref SMM.StartTime,
+                    node.minSplination, node.maxSplination - 0.01f,
+                    "Where along this node's section of road the extrusion begins, as a spline parameter.");
                 if (GUILayout.Button("match node", EditorStyles.miniButton, GUILayout.Width(80f)))
                 {
                     SMM.StartTime = node.time;
@@ -822,7 +852,9 @@ namespace RoadCityMaster
 
                 //End time:
                 EditorGUILayout.BeginHorizontal();
-                SMM.EndTime = EditorGUILayout.Slider("End param: ", SMM.EndTime, SMM.StartTime, node.maxSplination);
+                fields.FloatSlider("End param: ", key + "end", ref SMM.EndTime,
+                    SMM.StartTime, node.maxSplination,
+                    "Where along this node's section of road the extrusion ends, as a spline parameter.");
                 if (GUILayout.Button("match next", EditorStyles.miniButton, GUILayout.Width(80f)))
                 {
                     SMM.EndTime = node.nextTime;
@@ -842,7 +874,9 @@ namespace RoadCityMaster
                     if (SMM.isStretched)
                     {
                         //Stretch_UVThreshold:
-                        SMM.stretchUVThreshold = EditorGUILayout.Slider("UV stretch threshold:", SMM.stretchUVThreshold, 0.01f, 0.5f);
+                        fields.FloatSlider("UV stretch threshold:", key + "uvstretch", ref SMM.stretchUVThreshold,
+                            0.01f, 0.5f,
+                            "How far a UV may be stretched before the extrusion adds another repeat instead.");
                         //UV repeats:
                         SMM.RepeatUVType = (Splination.RepeatUVTypeEnum)EditorGUILayout.Popup("UV stretch axis: ", (int)SMM.RepeatUVType, RepeatUVTypeDescriptionsSpline, GUILayout.Width(250f));
                     }
@@ -863,9 +897,10 @@ namespace RoadCityMaster
                 //			SMM.EM.bMatchRoadIncrements = EditorGUILayout.Toggle("Match road increments: ",SMM.bMatchRoadIncrements); 
                 SMM.isMatchingTerrain = EditorGUILayout.Toggle("Match ground: ", SMM.isMatchingTerrain);
 
-                //Vector min/max threshold: 
+                //Vector min/max threshold:
                 EditorGUILayout.BeginHorizontal();
-                SMM.minMaxMod = EditorGUILayout.Slider("Vertex min/max threshold: ", SMM.minMaxMod, 0.01f, 0.2f);
+                fields.FloatSlider("Vertex min/max threshold: ", key + "minmax", ref SMM.minMaxMod, 0.01f, 0.2f,
+                    "How close two vertices must be, in metres, before they count as the same edge of the extrusion.");
                 if (GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     SMM.minMaxMod = 0.05f;
@@ -874,7 +909,9 @@ namespace RoadCityMaster
 
                 //Vertex matching precision:
                 EditorGUILayout.BeginHorizontal();
-                SMM.vertexMatchingPrecision = EditorGUILayout.Slider("Vertex matching precision: ", SMM.vertexMatchingPrecision, 0f, 0.01f);
+                fields.FloatSlider("Vertex matching precision: ", key + "vertprec", ref SMM.vertexMatchingPrecision,
+                    0f, 0.01f,
+                    "Tolerance, in metres, for welding the extrusion's ends onto the neighbouring section.");
                 if (GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     SMM.vertexMatchingPrecision = 0.005f;
@@ -924,7 +961,8 @@ namespace RoadCityMaster
                 EditorGUILayout.LabelField("Vertical options:");
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                SMM.verticalRaise = EditorGUILayout.Slider("Vertical raise magnitude:", SMM.verticalRaise, -512f, 512f);
+                fields.FloatSlider("Vertical raise magnitude:", key + "vraise", ref SMM.verticalRaise, -512f, 512f,
+                    "Metres to lift or drop the whole extrusion relative to the road surface.");
                 if (GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     SMM.verticalRaise = 0f;
@@ -979,7 +1017,9 @@ namespace RoadCityMaster
                     horizMatching = HorizMatchingDefaultsEnum.None;
                 }
                 EditorGUILayout.BeginHorizontal();
-                SMM.horizontalSep = EditorGUILayout.Slider("Horiz offset magnitude:", SMM.horizontalSep, (-1f * horizRoadMax), horizRoadMax);
+                fields.FloatSlider("Horiz offset magnitude:", key + "hsep", ref SMM.horizontalSep,
+                    (-1f * horizRoadMax), horizRoadMax,
+                    "Metres to move the extrusion sideways from the road centre. Negative is to the left.");
                 if (GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     SMM.horizontalSep = 0f;
@@ -1011,9 +1051,12 @@ namespace RoadCityMaster
                 {
                     SMM.isVerticalCutoffMatchingZero = EditorGUILayout.Toggle("Match spline height:", SMM.isVerticalCutoffMatchingZero);
                     SMM.isVerticalCutoffDownwards = EditorGUILayout.Toggle("Cut direction toggle:", SMM.isVerticalCutoffDownwards);
-                    SMM.VerticalCutoff = EditorGUILayout.Slider("Height cut offset: ", SMM.VerticalCutoff, -50f, 50f);
+                    fields.FloatSlider("Height cut offset: ", key + "vcut", ref SMM.VerticalCutoff, -50f, 50f,
+                        "Height, in metres, at which the extrusion's geometry is cut away.");
                     SMM.isVerticalMeshCutoffOppositeDir = EditorGUILayout.Toggle("Opposite dir mesh cut:", SMM.isVerticalMeshCutoffOppositeDir);
-                    SMM.VerticalMeshCutoffOffset = EditorGUILayout.Slider("Mesh cut offset: ", SMM.VerticalMeshCutoffOffset, -5f, 5f);
+                    fields.FloatSlider("Mesh cut offset: ", key + "vmeshcut", ref SMM.VerticalMeshCutoffOffset,
+                        -5f, 5f,
+                        "Metres to shift the cut plane away from the height above.");
                 }
                 EditorGUILayout.EndVertical();
 
@@ -1027,7 +1070,9 @@ namespace RoadCityMaster
                     SMM.isStartTypeDownOverriden = EditorGUILayout.Toggle("Override start down value: ", SMM.isStartTypeDownOverriden);
                     if (SMM.isStartTypeDownOverriden)
                     {
-                        SMM.startTypeDownOverride = EditorGUILayout.Slider("Downward movement: ", SMM.startTypeDownOverride, -10f, 10f);
+                        fields.FloatSlider("Downward movement: ", key + "startdown", ref SMM.startTypeDownOverride,
+                            -10f, 10f,
+                            "Metres the start of the extrusion is pushed down, instead of the automatic amount.");
                     }
                 }
                 if (SMM.isEndDown)
@@ -1035,7 +1080,9 @@ namespace RoadCityMaster
                     SMM.isEndTypeDownOverriden = EditorGUILayout.Toggle("Override end down value: ", SMM.isEndTypeDownOverriden);
                     if (SMM.isEndTypeDownOverriden)
                     {
-                        SMM.endTypeDownOverride = EditorGUILayout.Slider("Downward movement: ", SMM.endTypeDownOverride, -10f, 10f);
+                        fields.FloatSlider("Downward movement: ", key + "enddown", ref SMM.endTypeDownOverride,
+                            -10f, 10f,
+                            "Metres the end of the extrusion is pushed down, instead of the automatic amount.");
                     }
                 }
                 EditorGUILayout.EndVertical();
@@ -1065,8 +1112,12 @@ namespace RoadCityMaster
                 SMM.EndCapStart = (GameObject)EditorGUILayout.ObjectField("Prefab:", SMM.EndCapStart, typeof(GameObject), false);
                 if (SMM.EndCapStart != null)
                 {
-                    SMM.EndCapCustomOffsetStart = EditorGUILayout.Vector3Field("Position offset:", SMM.EndCapCustomOffsetStart);
-                    SMM.EndCapCustomRotOffsetStart = EditorGUILayout.Vector3Field("Rotation offset:", SMM.EndCapCustomRotOffsetStart);
+                    // B-19. Three separate boxes rather than one Unity Vector3Field, so tabbing X -> Y commits X and a
+                    // half-typed Z does not move the object. Each axis carries its own control name.
+                    fields.Vector3Field("Position offset:", key + "capoffs", ref SMM.EndCapCustomOffsetStart,
+                        "Metres to move the start object from where the extrusion begins.");
+                    fields.Vector3Field("Rotation offset:", key + "caprots", ref SMM.EndCapCustomRotOffsetStart,
+                        "Degrees to turn the start object from the road's own direction.");
                 }
                 EditorGUILayout.EndVertical();
 
@@ -1087,8 +1138,10 @@ namespace RoadCityMaster
                 SMM.EndCapEnd = (GameObject)EditorGUILayout.ObjectField("Prefab:", SMM.EndCapEnd, typeof(GameObject), false);
                 if (SMM.EndCapEnd != null)
                 {
-                    SMM.EndCapCustomOffsetEnd = EditorGUILayout.Vector3Field("Position offset:", SMM.EndCapCustomOffsetEnd);
-                    SMM.EndCapCustomRotOffsetEnd = EditorGUILayout.Vector3Field("Rotation offset:", SMM.EndCapCustomRotOffsetEnd);
+                    fields.Vector3Field("Position offset:", key + "capoffe", ref SMM.EndCapCustomOffsetEnd,
+                        "Metres to move the end object from where the extrusion finishes.");
+                    fields.Vector3Field("Rotation offset:", key + "caprote", ref SMM.EndCapCustomRotOffsetEnd,
+                        "Degrees to turn the end object from the road's own direction.");
                 }
                 EditorGUILayout.EndVertical();
 
@@ -1114,34 +1167,39 @@ namespace RoadCityMaster
                 {
                     if (SMM.CollisionType == Splination.CollisionTypeEnum.SimpleMeshTriangle)
                     {
+                        // B-19. Nine sliders that between them define one collision triangle. Dragging any one of them
+                        // used to rebuild the extrusion's collider on every frame of the drag; the corner now moves
+                        // once, when the handle is let go. `CollisionTriBL` and its siblings are plain Vector3 fields on
+                        // the SplinatedMeshMaker, so a ref to one axis writes straight into the real object.
                         EditorGUILayout.LabelField("Bottom left:");
-                        SMM.CollisionTriBL.x = EditorGUILayout.Slider(" x-axis: ", SMM.CollisionTriBL.x, SMM.mMinX - 5f, SMM.mMaxX + 5f);
-                        SMM.CollisionTriBL.y = EditorGUILayout.Slider(" y-axis: ", SMM.CollisionTriBL.y, SMM.mMinY - 5f, SMM.mMaxY + 5f);
-                        SMM.CollisionTriBL.z = EditorGUILayout.Slider(" z-axis: ", SMM.CollisionTriBL.z, SMM.mMinZ - 5f, SMM.mMaxZ + 5f);
+                        fields.FloatSlider(" x-axis: ", key + "ctblx", ref SMM.CollisionTriBL.x, SMM.mMinX - 5f, SMM.mMaxX + 5f, null);
+                        fields.FloatSlider(" y-axis: ", key + "ctbly", ref SMM.CollisionTriBL.y, SMM.mMinY - 5f, SMM.mMaxY + 5f, null);
+                        fields.FloatSlider(" z-axis: ", key + "ctblz", ref SMM.CollisionTriBL.z, SMM.mMinZ - 5f, SMM.mMaxZ + 5f, null);
 
                         EditorGUILayout.LabelField("Bottom right:");
-                        SMM.CollisionTriBR.x = EditorGUILayout.Slider(" x-axis: ", SMM.CollisionTriBR.x, SMM.mMinX - 5f, SMM.mMaxX + 5f);
-                        SMM.CollisionTriBR.y = EditorGUILayout.Slider(" y-axis: ", SMM.CollisionTriBR.y, SMM.mMinY - 5f, SMM.mMaxY + 5f);
-                        SMM.CollisionTriBR.z = EditorGUILayout.Slider(" z-axis: ", SMM.CollisionTriBR.z, SMM.mMinZ - 5f, SMM.mMaxZ + 5f);
+                        fields.FloatSlider(" x-axis: ", key + "ctbrx", ref SMM.CollisionTriBR.x, SMM.mMinX - 5f, SMM.mMaxX + 5f, null);
+                        fields.FloatSlider(" y-axis: ", key + "ctbry", ref SMM.CollisionTriBR.y, SMM.mMinY - 5f, SMM.mMaxY + 5f, null);
+                        fields.FloatSlider(" z-axis: ", key + "ctbrz", ref SMM.CollisionTriBR.z, SMM.mMinZ - 5f, SMM.mMaxZ + 5f, null);
 
                         EditorGUILayout.LabelField("Top:");
-                        SMM.CollisionTriT.x = EditorGUILayout.Slider(" x-axis: ", SMM.CollisionTriT.x, SMM.mMinX - 5f, SMM.mMaxX + 5f);
-                        SMM.CollisionTriT.y = EditorGUILayout.Slider(" y-axis: ", SMM.CollisionTriT.y, SMM.mMinY - 5f, SMM.mMaxY + 5f);
-                        SMM.CollisionTriT.z = EditorGUILayout.Slider(" z-axis: ", SMM.CollisionTriT.z, SMM.mMinZ - 5f, SMM.mMaxZ + 5f);
+                        fields.FloatSlider(" x-axis: ", key + "cttx", ref SMM.CollisionTriT.x, SMM.mMinX - 5f, SMM.mMaxX + 5f, null);
+                        fields.FloatSlider(" y-axis: ", key + "ctty", ref SMM.CollisionTriT.y, SMM.mMinY - 5f, SMM.mMaxY + 5f, null);
+                        fields.FloatSlider(" z-axis: ", key + "cttz", ref SMM.CollisionTriT.z, SMM.mMinZ - 5f, SMM.mMaxZ + 5f, null);
 
                     }
                     else if (SMM.CollisionType == Splination.CollisionTypeEnum.SimpleMeshTrapezoid)
                     {
-                        SMM.CollisionBoxBL = EditorGUILayout.Vector3Field(" Bottom left:", SMM.CollisionBoxBL);
-                        SMM.CollisionBoxBR = EditorGUILayout.Vector3Field(" Bottom right:", SMM.CollisionBoxBR);
-                        SMM.CollisionBoxTL = EditorGUILayout.Vector3Field(" Top left:", SMM.CollisionBoxTL);
-                        SMM.CollisionBoxTR = EditorGUILayout.Vector3Field(" Top right:", SMM.CollisionBoxTR);
+                        fields.Vector3Field(" Bottom left:", key + "cbbl", ref SMM.CollisionBoxBL, null);
+                        fields.Vector3Field(" Bottom right:", key + "cbbr", ref SMM.CollisionBoxBR, null);
+                        fields.Vector3Field(" Top left:", key + "cbtl", ref SMM.CollisionBoxTL, null);
+                        fields.Vector3Field(" Top right:", key + "cbtr", ref SMM.CollisionBoxTR, null);
                     }
                 }
 
                 if (SMM.CollisionType == Splination.CollisionTypeEnum.BoxCollision)
                 {
-                    SMM.boxColliderOffset = EditorGUILayout.Vector3Field("Box collider center offset:", SMM.boxColliderOffset);
+                    fields.Vector3Field("Box collider center offset:", key + "boxoff", ref SMM.boxColliderOffset,
+                        "Metres to move the box collider's centre from the extrusion's own centre.");
                     SMM.isBoxColliderFlippedOnX = EditorGUILayout.Toggle("Flip center X:", SMM.isBoxColliderFlippedOnX);
                     SMM.isBoxColliderFlippedOnZ = EditorGUILayout.Toggle("Flip center Z:", SMM.isBoxColliderFlippedOnZ);
 
@@ -1149,7 +1207,8 @@ namespace RoadCityMaster
                     SMM.isStretchedSize = EditorGUILayout.Toggle("Box collider size edit:", SMM.isStretchedSize);
                     if (SMM.isStretchedSize)
                     {
-                        SMM.boxColliderSize = EditorGUILayout.Vector3Field("Size:", SMM.boxColliderSize);
+                        fields.Vector3Field("Size:", key + "boxsize", ref SMM.boxColliderSize,
+                            "The box collider's size in metres, instead of the size taken from the extrusion.");
                     }
                     else
                     {
@@ -1285,6 +1344,10 @@ namespace RoadCityMaster
             {
                 EOM = node.EdgeObjects[index];
 
+                // B-19. Same reasoning as the extrusion loop above: a node can carry several edge object sets that draw
+                // identical fields, so every deferred control's name is qualified by the entry's list position.
+                string key = "eom" + index.ToString() + "#";
+
                 currentCount += 1;
                 EditorGUILayout.BeginVertical("TextArea");
 
@@ -1334,7 +1397,8 @@ namespace RoadCityMaster
 
                 EditorGUILayout.BeginVertical("box");
                 //Name:
-                EOM.objectName = EditorGUILayout.TextField("Name: ", EOM.objectName);
+                fields.StringField("Name: ", key + "name", ref EOM.objectName,
+                    "The name this edge object set is listed under, and the name given to the objects it places.");
 
                 //Edge object:
                 EOM.edgeObject = (GameObject)EditorGUILayout.ObjectField("Edge object: ", EOM.edgeObject, typeof(GameObject), false);
@@ -1390,11 +1454,17 @@ namespace RoadCityMaster
 
                 if (EOM.isSingle)
                 {
-                    EOM.singlePosition = EditorGUILayout.Slider("Single location: ", EOM.singlePosition, node.time, 1f);
+                    // B-19. Every one of these commits on Enter, focus-out or handle-release. On this inspector that
+                    // matters more than most: the apply gate below calls UpdateEdgeObjects(), which re-places every
+                    // object in the set, so a dragged handle used to delete and re-instantiate a whole row of
+                    // guard rails on every frame of the drag.
+                    fields.FloatSlider("Single location: ", key + "singlepos", ref EOM.singlePosition, node.time, 1f,
+                        "Where along this node's section of road the single object is placed.");
 
                     if (node.isBridgeStart && node.isBridgeMatched)
                     {
-                        EOM.singleOnlyBridgePercent = EditorGUILayout.Slider("Bridge %: ", EOM.singleOnlyBridgePercent, 0f, 1f);
+                        fields.FloatSlider("Bridge %: ", key + "bridgepct", ref EOM.singleOnlyBridgePercent, 0f, 1f,
+                            "Where along the bridge the object is placed, as a fraction of the bridge's length.");
                         float dist = (EOM.singleOnlyBridgePercent * (node.bridgeCounterpartNode.dist - node.dist) + node.dist);
                         EOM.singlePosition = node.spline.TranslateDistBasedToParam(dist);
                     }
@@ -1407,7 +1477,8 @@ namespace RoadCityMaster
 
                 if (!EOM.isSingle)
                 {
-                    EOM.meterSep = EditorGUILayout.Slider("Dist between objects: ", EOM.meterSep, 1f, 256f);
+                    fields.FloatSlider("Dist between objects: ", key + "metersep", ref EOM.meterSep, 1f, 256f,
+                        "Spacing in metres between one placed object and the next.");
                 }
 
 
@@ -1415,7 +1486,8 @@ namespace RoadCityMaster
                 EOM.isStartMatchRoadDefinition = EditorGUILayout.Toggle("Match road definition: ", EOM.isStartMatchRoadDefinition);
                 if (EOM.isStartMatchRoadDefinition)
                 {
-                    EOM.startMatchRoadDef = EditorGUILayout.Slider("Position fine tuning: ", EOM.startMatchRoadDef, 0f, 1f);
+                    fields.FloatSlider("Position fine tuning: ", key + "startmatch", ref EOM.startMatchRoadDef, 0f, 1f,
+                        "Nudges the first object's position within one road definition step.");
                 }
                 #endregion
 
@@ -1435,7 +1507,9 @@ namespace RoadCityMaster
 
                     #region "Start param"
                     EditorGUILayout.BeginHorizontal();
-                    EOM.startTime = EditorGUILayout.Slider("Start param: ", EOM.startTime, node.minSplination, EOM.endTime);
+                    fields.FloatSlider("Start param: ", key + "start", ref EOM.startTime,
+                        node.minSplination, EOM.endTime,
+                        "Where along this node's section of road the run of objects begins.");
 
                     if (EOM.endTime < EOM.startTime)
                     {
@@ -1453,7 +1527,9 @@ namespace RoadCityMaster
 
                     #region "End param"
                     EditorGUILayout.BeginHorizontal();
-                    EOM.endTime = EditorGUILayout.Slider("End param: ", EOM.endTime, EOM.startTime, node.maxSplination);
+                    fields.FloatSlider("End param: ", key + "end", ref EOM.endTime,
+                        EOM.startTime, node.maxSplination,
+                        "Where along this node's section of road the run of objects ends.");
                     //Mathf.Clamp(EditorGUILayout.Slider( "End param: ", EOM.EndTime, 0f/*EOM.StartTime*/, 1f/*tNode.MaxSplination*/ ), 0f, 1f);
                     // FH EXPERIMENTAL fix for EdgeObjects???
 
@@ -1477,7 +1553,8 @@ namespace RoadCityMaster
                 EditorGUILayout.BeginVertical("box");
 
                 EditorGUILayout.BeginHorizontal();
-                EOM.verticalRaise = EditorGUILayout.Slider("Vertical raise magnitude:", EOM.verticalRaise, -512f, 512f);
+                fields.FloatSlider("Vertical raise magnitude:", key + "vraise", ref EOM.verticalRaise, -512f, 512f,
+                    "Metres to lift or drop the placed objects relative to the road surface.");
                 if (GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     EOM.verticalRaise = 0f;
@@ -1544,7 +1621,9 @@ namespace RoadCityMaster
                 }
 
                 EditorGUILayout.BeginHorizontal();
-                EOM.horizontalSep = EditorGUILayout.Slider("Horiz offset magnitude:", EOM.horizontalSep, (-1f * horizRoadMax), horizRoadMax);
+                fields.FloatSlider("Horiz offset magnitude:", key + "hsep", ref EOM.horizontalSep,
+                    (-1f * horizRoadMax), horizRoadMax,
+                    "Metres to move the placed objects sideways from the road centre. Negative is to the left.");
                 if (GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     EOM.horizontalSep = 0f;
@@ -1586,9 +1665,12 @@ namespace RoadCityMaster
                 }
                 EditorGUILayout.EndHorizontal();
 
-                EOM.customRotation.x = EditorGUILayout.Slider("x-axis: ", EOM.customRotation.x, -360f, 360f);
-                EOM.customRotation.y = EditorGUILayout.Slider("y-axis: ", EOM.customRotation.y, -360f, 360f);
-                EOM.customRotation.z = EditorGUILayout.Slider("z-axis: ", EOM.customRotation.z, -360f, 360f);
+                fields.FloatSlider("x-axis: ", key + "rotx", ref EOM.customRotation.x, -360f, 360f,
+                    "Degrees of extra rotation about X applied to each placed object.");
+                fields.FloatSlider("y-axis: ", key + "roty", ref EOM.customRotation.y, -360f, 360f,
+                    "Degrees of extra rotation about Y applied to each placed object.");
+                fields.FloatSlider("z-axis: ", key + "rotz", ref EOM.customRotation.z, -360f, 360f,
+                    "Degrees of extra rotation about Z applied to each placed object.");
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginVertical();
@@ -1604,8 +1686,16 @@ namespace RoadCityMaster
 
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                float scale = EditorGUILayout.Slider("Custom scale: ", EOM.customScale.x, 1f, 10f);
-                EOM.customScale = new Vector3(scale, scale, scale);
+                // B-19. One slider standing for all three axes, so it drives a local and the uniform vector is written
+                // only on the pass the slider commits. The old line assigned `new Vector3(scale, scale, scale)` on every
+                // repaint, which meant a non-uniform customScale set anywhere else was flattened the next time an author
+                // so much as moved the mouse over this inspector.
+                float scale = EOM.customScale.x;
+                if (fields.FloatSlider("Custom scale: ", key + "scale", ref scale, 1f, 10f,
+                    "Uniform scale applied to each placed object."))
+                {
+                    EOM.customScale = new Vector3(scale, scale, scale);
+                }
                 if (GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     EOM.customScale = new Vector3(1f, 1f, 1f);

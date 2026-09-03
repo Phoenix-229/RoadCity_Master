@@ -119,6 +119,12 @@ namespace RoadCityMaster
         private bool isNeedingRoadUpdate = false;
         private bool isApplyingMaterialsCheck = false;
         private bool isApplyingMatsCheck = false;
+
+        /// <summary> B-19. This inspector's own deferred-commit controls. One per Editor instance, because the pending
+        /// text of a half-typed number belongs to the inspector the author is typing into: two of these open on two
+        /// roads -- one of them a locked second inspector -- must not share a buffer. Reset at the top of every pass by
+        /// <see cref="FocusOutFields.BeginFrame"/>, and read once after drawing to decide whether to ask for a build. </summary>
+        private readonly FocusOutFields fields = new FocusOutFields();
         #endregion
 
 
@@ -317,6 +323,7 @@ namespace RoadCityMaster
             InspectorTextLayout.Apply();
 
             isNeedingRoadUpdate = false;
+            fields.BeginFrame();
             //Graphic null checks:
             if (!isInitialized)
             {
@@ -369,7 +376,12 @@ namespace RoadCityMaster
             // instead of being silently clamped. Four fields are held back and drawn at their own positions below:
             // lane width beside the road-width readout it feeds, shoulder width and max grade beside the toggles that
             // decide whether they mean anything at all, and the terrain match drop with the other terrain controls.
-            LegacyInspectorShell.AllGroups(serializedObject, "Road", drawnInPlace);
+            //
+            // B-19. `fields` goes in here as well as into the four in-place calls below. It is the same commit buffer
+            // for both, which is what makes the rule uniform: whether a value happens to sit in a foldout or beside the
+            // toggle that governs it, it reaches the road when the author presses Enter or moves focus away, and a road
+            // is rebuilt once for the number they meant rather than once per letter on the way to it.
+            LegacyInspectorShell.AllGroups(serializedObject, "Road", fields, drawnInPlace);
 
             // RM-109. The class popup drawn just above is what the road SAYS it is; this is what makes saying it mean
             // something. Nothing read the choice back out before, so a road could sit at Urban Two Lane with 5 m lanes
@@ -377,7 +389,7 @@ namespace RoadCityMaster
             DrawRoadClassReconcile();
 
             //Option: Lane and road width:
-            LegacyInspectorShell.Field(serializedObject, "Road", "laneWidth", resetLaneWidth);
+            LegacyInspectorShell.Field(serializedObject, "Road", "laneWidth", fields, resetLaneWidth);
             EditorGUILayout.LabelField("Road width: " + road.RoadWidth().ToString("F1") + " meters");
 
             //Option: Shoulders enabled:
@@ -386,7 +398,7 @@ namespace RoadCityMaster
             //Option: Shoulders width:
             if (road.isShouldersEnabled)
             {
-                LegacyInspectorShell.Field(serializedObject, "Road", "shoulderWidth", resetShoulderWidth);
+                LegacyInspectorShell.Field(serializedObject, "Road", "shoulderWidth", fields, resetShoulderWidth);
             }
 
             // RM-102. The road definition -- metres of road per generated segment -- moved into the "what is generated
@@ -420,7 +432,7 @@ namespace RoadCityMaster
                 // RM-102. This was a 0–1 slider, which let an author set a 100% grade -- a 45° road -- and said
                 // nothing about it. Through the drawer it is a fraction with AASHTO's 6–12% working band and a 15%
                 // hard ceiling behind it, and a value past that ceiling is reported at the field, not clamped away.
-                LegacyInspectorShell.Field(serializedObject, "Road", "maxGrade", resetMaxGrade);
+                LegacyInspectorShell.Field(serializedObject, "Road", "maxGrade", fields, resetMaxGrade);
             }
 
             //Mesh colliders:
@@ -431,7 +443,7 @@ namespace RoadCityMaster
             isStatic.boolValue = EditorGUILayout.Toggle("Static: ", road.isStatic);
             //Used for lightmapping:
             isLightmapped.boolValue = EditorGUILayout.Toggle("Lightmapped: ", road.isLightmapped);
-            desiredRampHeight.floatValue = EditorGUILayout.FloatField("Ramp Height:", road.desiredRampHeight);
+            fields.FloatField(desiredRampHeight, "Ramp Height:");
 
             //Option: Save meshes as unity assets options:
             isSavingMeshes.boolValue = EditorGUILayout.Toggle("Save mesh assets: ", road.isSavingMeshes);
@@ -450,11 +462,11 @@ namespace RoadCityMaster
             EditorGUILayout.BeginVertical("box");
 
             //Option: Terrain subtraction:
-            LegacyInspectorShell.Field(serializedObject, "Road", "matchTerrainSubtraction", resetTerrainSubtraction);
+            LegacyInspectorShell.Field(serializedObject, "Road", "matchTerrainSubtraction", fields, resetTerrainSubtraction);
 
             //Option: Spline magnitude limit:
             EditorGUILayout.BeginHorizontal();
-            magnitudeThreshold.floatValue = EditorGUILayout.Slider("Spline magnitude limit: ", road.magnitudeThreshold, 128f, 8192f);
+            fields.FloatSlider(magnitudeThreshold, "Spline magnitude limit:", 128f, 8192f);
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 magnitudeThreshold.floatValue = 300f;
@@ -474,7 +486,7 @@ namespace RoadCityMaster
             if (road.isHeightModificationEnabled)
             {
                 EditorGUILayout.BeginHorizontal();
-                matchHeightsDistance.floatValue = EditorGUILayout.Slider("Heights match width: ", road.matchHeightsDistance, 0.01f, 512f);
+                fields.FloatSlider(matchHeightsDistance, "Heights match width:", 0.01f, 512f);
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     matchHeightsDistance.floatValue = 50f;
@@ -486,7 +498,7 @@ namespace RoadCityMaster
             if (road.isDetailModificationEnabled)
             {
                 EditorGUILayout.BeginHorizontal();
-                clearDetailsDistance.floatValue = EditorGUILayout.Slider("Details clear width: ", road.clearDetailsDistance, 0.01f, 512f);
+                fields.FloatSlider(clearDetailsDistance, "Details clear width:", 0.01f, 512f);
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearDetailsDistance.floatValue = 30f;
@@ -495,7 +507,7 @@ namespace RoadCityMaster
                 EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.BeginHorizontal();
-                clearDetailsDistanceHeight.floatValue = EditorGUILayout.Slider("Details clear height: ", road.clearDetailsDistanceHeight, 0.01f, 512f);
+                fields.FloatSlider(clearDetailsDistanceHeight, "Details clear height:", 0.01f, 512f);
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearDetailsDistanceHeight.floatValue = 5f;
@@ -508,7 +520,7 @@ namespace RoadCityMaster
             if (road.isTreeModificationEnabled)
             {
                 EditorGUILayout.BeginHorizontal();
-                clearTreesDistance.floatValue = EditorGUILayout.Slider("Trees clear width: ", road.clearTreesDistance, 0.01f, 512f);
+                fields.FloatSlider(clearTreesDistance, "Trees clear width:", 0.01f, 512f);
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearTreesDistance.floatValue = 30f;
@@ -516,7 +528,7 @@ namespace RoadCityMaster
                 EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.BeginHorizontal();
-                clearTreesDistanceHeight.floatValue = EditorGUILayout.Slider("Trees clear height: ", road.clearTreesDistanceHeight, 0.01f, 512f);
+                fields.FloatSlider(clearTreesDistanceHeight, "Trees clear height:", 0.01f, 512f);
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearTreesDistanceHeight.floatValue = 50f;
@@ -592,7 +604,7 @@ namespace RoadCityMaster
             EditorGUILayout.BeginHorizontal();
 
             //Option: Editor camera meters per sec
-            editorCameraMetersPerSecond.floatValue = EditorGUILayout.Slider("Camera meters/sec:", road.EditorCameraMetersPerSecond, 1f, 512f);
+            fields.FloatSlider(editorCameraMetersPerSecond, "Camera meters/sec:", 1f, 512f);
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 editorCameraMetersPerSecond.floatValue = 60f;
@@ -661,11 +673,11 @@ namespace RoadCityMaster
             //Physics materials:
             GUILayout.Label("Physics materials defaults:");
             //Option: physical road mat:
-            EditorGUILayout.PropertyField(roadPhysicMaterial, new GUIContent("Road phys mat: "));
+            fields.Property(roadPhysicMaterial, new GUIContent("Road phys mat: "));
 
 
             //Option: physical shoulder mat:
-            EditorGUILayout.PropertyField(shoulderPhysicMaterial, new GUIContent("Shoulder phys mat: "));
+            fields.Property(shoulderPhysicMaterial, new GUIContent("Shoulder phys mat: "));
 
 
             GUILayout.Space(4);
@@ -727,13 +739,29 @@ namespace RoadCityMaster
             bool isTerrainHistoryChanged = false;
             bool isEditorCameraSpeedChanged = false;
 
-            if (GUI.changed)
+            // B-19. `fields.Changed` has to be part of this test, and it is not belt-and-braces: it is the whole point.
+            // A deferred control commits on the frame the author presses Enter, moves focus away, or lets a slider
+            // handle go -- and on that frame no Unity control reported a change, so GUI.changed is false. Gating this
+            // block on GUI.changed alone would skip ApplyModifiedProperties() on exactly the frame that has something
+            // to apply, and the next serializedObject.Update() would overwrite the committed value with the old one.
+            if (GUI.changed || fields.Changed)
             {
                 if (isGizmosEnabled.boolValue != road.isGizmosEnabled)
                 {
                     road.ToggleWireframes();
                     SceneView.RepaintAll();
                 }
+
+                // B-19. A rebuild is asked for on the COMMIT, not on a difference. The three pre-handle tests below are
+                // still right for what they do -- they name WHICH value moved, and each has a side effect of its own to
+                // run -- but "does the serialised value differ from the live one" was the wrong question to ask about
+                // rebuilding, because a per-keystroke control made it true on every frame of typing. The deferred commit
+                // is what says the author finished, so that is what asks.
+                //
+                // Minus the editor camera speed, which is the one committed value on this inspector that is not part of
+                // the road: it moves the scene view's fly speed and nothing about the mesh. It has to be tested first
+                // for this subtraction to see it, which is why this sits below the pre-handles rather than above them.
+
                 //Option pre-handle: Lane count:
                 if (SerialisedLaneTotal() != road.LaneTotal())
                 {
@@ -751,6 +779,11 @@ namespace RoadCityMaster
                 if (!RootUtils.IsApproximately(editorCameraMetersPerSecond.floatValue, road.EditorCameraMetersPerSecond, 0.001f))
                 {
                     isEditorCameraSpeedChanged = true;
+                }
+
+                if (fields.Changed && !isEditorCameraSpeedChanged)
+                {
+                    isNeedingRoadUpdate = true;
                 }
 
                 //Apply serialization:
@@ -824,7 +857,7 @@ namespace RoadCityMaster
             isUsingDefaultMaterials.boolValue = EditorGUILayout.Toggle("Use default materials:", road.isUsingDefaultMaterials);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(roadMaterial1, new GUIContent("  Mat #1: "));
+            fields.Property(roadMaterial1, new GUIContent("  Mat #1: "));
             if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
             {
                 road.RoadMaterial1 = null;
@@ -835,7 +868,7 @@ namespace RoadCityMaster
             if (road.RoadMaterial1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(roadMaterial2, new GUIContent("  Mat #2: "));
+                fields.Property(roadMaterial2, new GUIContent("  Mat #2: "));
                 if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                 {
                     road.RoadMaterial2 = null;
@@ -846,7 +879,7 @@ namespace RoadCityMaster
                 if (road.RoadMaterial2 != null)
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PropertyField(roadMaterial3, new GUIContent("  Mat #3: "));
+                    fields.Property(roadMaterial3, new GUIContent("  Mat #3: "));
                     if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                     {
                         road.RoadMaterial3 = null;
@@ -857,7 +890,7 @@ namespace RoadCityMaster
                     if (road.RoadMaterial3 != null)
                     {
                         EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.PropertyField(roadMaterial4, new GUIContent("  Mat #4: "));
+                        fields.Property(roadMaterial4, new GUIContent("  Mat #4: "));
                         if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                         {
                             road.RoadMaterial4 = null;
@@ -875,7 +908,7 @@ namespace RoadCityMaster
             GUILayout.Label("Road marker material(s) defaults:");
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PropertyField(roadMaterialMarker1, new GUIContent("  Mat #1: "));
+            fields.Property(roadMaterialMarker1, new GUIContent("  Mat #1: "));
             if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
             {
                 road.RoadMaterialMarker1 = null;
@@ -885,7 +918,7 @@ namespace RoadCityMaster
             if (road.RoadMaterialMarker1 != null)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(roadMaterialMarker2, new GUIContent("  Mat #2: "));
+                fields.Property(roadMaterialMarker2, new GUIContent("  Mat #2: "));
                 if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                 {
                     road.RoadMaterialMarker2 = null;
@@ -896,7 +929,7 @@ namespace RoadCityMaster
                 if (road.RoadMaterialMarker2 != null)
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PropertyField(roadMaterialMarker3, new GUIContent("  Mat #3: "));
+                    fields.Property(roadMaterialMarker3, new GUIContent("  Mat #3: "));
                     if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                     {
                         road.RoadMaterialMarker3 = null;
@@ -907,7 +940,7 @@ namespace RoadCityMaster
                     if (road.RoadMaterialMarker3 != null)
                     {
                         EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.PropertyField(roadMaterialMarker4, new GUIContent("  Mat #4: "));
+                        fields.Property(roadMaterialMarker4, new GUIContent("  Mat #4: "));
                         if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                         {
                             road.RoadMaterialMarker4 = null;
@@ -927,7 +960,7 @@ namespace RoadCityMaster
                 GUILayout.Label("Shoulder base material(s) defaults:");
 
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(shoulderMaterial1, new GUIContent("  Mat #1: "));
+                fields.Property(shoulderMaterial1, new GUIContent("  Mat #1: "));
                 if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                 {
                     road.ShoulderMaterial1 = null;
@@ -938,7 +971,7 @@ namespace RoadCityMaster
                 if (road.ShoulderMaterial1 != null)
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PropertyField(shoulderMaterial2, new GUIContent("  Mat #2: "));
+                    fields.Property(shoulderMaterial2, new GUIContent("  Mat #2: "));
                     if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                     {
                         road.ShoulderMaterial2 = null;
@@ -949,7 +982,7 @@ namespace RoadCityMaster
                     if (road.ShoulderMaterial2 != null)
                     {
                         EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.PropertyField(shoulderMaterial3, new GUIContent("  Mat #3: "));
+                        fields.Property(shoulderMaterial3, new GUIContent("  Mat #3: "));
                         if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                         {
                             road.ShoulderMaterial3 = null;
@@ -960,7 +993,7 @@ namespace RoadCityMaster
                         if (road.ShoulderMaterial3 != null)
                         {
                             EditorGUILayout.BeginHorizontal();
-                            EditorGUILayout.PropertyField(shoulderMaterial4, new GUIContent("  Mat #4: "));
+                            fields.Property(shoulderMaterial4, new GUIContent("  Mat #4: "));
                             if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                             {
                                 road.ShoulderMaterial4 = null;
@@ -981,7 +1014,7 @@ namespace RoadCityMaster
                 GUILayout.Label("Shoulder marker material(s) defaults:");
 
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(shoulderMaterialMarker1, new GUIContent("  Mat #1: "));
+                fields.Property(shoulderMaterialMarker1, new GUIContent("  Mat #1: "));
                 if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                 {
                     road.ShoulderMaterialMarker1 = null;
@@ -992,7 +1025,7 @@ namespace RoadCityMaster
                 if (road.ShoulderMaterialMarker1 != null)
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PropertyField(shoulderMaterialMarker2, new GUIContent("  Mat #2: "));
+                    fields.Property(shoulderMaterialMarker2, new GUIContent("  Mat #2: "));
                     if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                     {
                         road.ShoulderMaterialMarker2 = null;
@@ -1003,7 +1036,7 @@ namespace RoadCityMaster
                     if (road.ShoulderMaterialMarker2 != null)
                     {
                         EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.PropertyField(shoulderMaterialMarker3, new GUIContent("  Mat #3: "));
+                        fields.Property(shoulderMaterialMarker3, new GUIContent("  Mat #3: "));
                         if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                         {
                             road.ShoulderMaterialMarker3 = null;
@@ -1014,7 +1047,7 @@ namespace RoadCityMaster
                         if (road.ShoulderMaterialMarker3 != null)
                         {
                             EditorGUILayout.BeginHorizontal();
-                            EditorGUILayout.PropertyField(shoulderMaterialMarker4, new GUIContent("  Mat #4: "));
+                            fields.Property(shoulderMaterialMarker4, new GUIContent("  Mat #4: "));
                             if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
                             {
                                 road.ShoulderMaterialMarker4 = null;

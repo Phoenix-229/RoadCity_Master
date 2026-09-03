@@ -73,6 +73,7 @@ namespace RoadCityMaster
             CaseOneGestureIsOneUndoStep(builder, failures);
             CaseTheCensusCoversEveryDrawnField(builder, failures);
             CaseEveryWindowHasAWayIn(builder, failures);
+            CaseInputsCommitOnFocusOut(builder, failures);
 
             foreach (string failure in failures)
             {
@@ -471,10 +472,20 @@ namespace RoadCityMaster
                 {
                     if (!lines[l].Contains("ApplyModifiedProperties()")) { continue; }
 
+                    // B-19. Matched on the guard's OPENING, `if (GUI.changed`, and deliberately not on the whole of
+                    // the old `if (GUI.changed)`. Once a value commits on focus-out instead of per keystroke, no Unity
+                    // control reports a change on the frame the commit lands, so GUI.changed is false there and every
+                    // repaint guard in the tool had to become `if (GUI.changed || fields.Changed)`. Matching the
+                    // closing bracket made this case read those guards as ABSENT, classify the repaint flush as a
+                    // stray command, and then demand an Undo.Record beside a flush that already takes its undo step
+                    // from the guard -- so the case failed on the fix rather than on a fault.
+                    //
+                    // Whether the `fields.Changed` half is actually present is case 10's assertion
+                    // (`CommitBufferThreading`), not this one's, so that requirement lives in exactly one place.
                     bool guarded = false;
                     for (int back = l; back >= 0 && back > l - 60; back--)
                     {
-                        if (lines[back].Contains("if (GUI.changed)")) { guarded = true; break; }
+                        if (lines[back].Contains("if (GUI.changed")) { guarded = true; break; }
                     }
                     if (guarded) { onRepaintPath++; continue; }
 
@@ -648,6 +659,242 @@ namespace RoadCityMaster
         #endregion
 
 
+        #region "Case 10 -- a typed or dragged value commits when the author is done, not per keystroke (B-19)"
+        /// <summary> B-19's gate. An author typing 3500 into a road's length used to build the road at 3, then at 35,
+        /// then at 350, then at 3500 -- four rebuilds, four undo steps, and three of them from a number nobody meant.
+        /// Worse, each rebuild ran <c>serializedObject.Update()</c> on the way out, which re-read the property and
+        /// replaced the half-typed text under the cursor, so a slow typist could not finish the number at all.
+        ///
+        /// The fix is <see cref="FocusOutFields"/>: a typed value reaches the property on Enter or focus-out, a dragged
+        /// handle on mouse-up, and the control shows what the author is typing in the meantime. This case is what keeps
+        /// it that way, and it gates four separate things, because there are four separate ways to lose it.
+        ///
+        /// The first is the obvious one: a new raw <c>FloatField</c> or <c>Slider</c> appearing in an inspector, which
+        /// is a per-keystroke control again no matter what the rest of the file does. That is a per-file budget with an
+        /// allowance table, and the table is the record of every deliberate exception -- see <see cref="allowedRawInput"/>.
+        ///
+        /// The second is the subtle one, and it is the one that cost a session to find. On the frame a deferred control
+        /// commits, NO Unity control reported a change, so <c>GUI.changed</c> is false. An inspector whose apply gate
+        /// reads <c>if (GUI.changed)</c> therefore skips <c>ApplyModifiedProperties()</c> on precisely the frame that
+        /// had something to apply, and the next <c>Update()</c> reads the old value back out of the object -- the
+        /// author's number is accepted, discarded, and the control shows the discard as though they had mistyped. The
+        /// gate demands that any <c>GUI.changed</c> guard wrapping an apply also test <c>fields.Changed</c>.
+        ///
+        /// The third is a buffer that never gets a frame boundary: <see cref="FocusOutFields.BeginFrame"/> is what
+        /// clears the previous pass's verdict, and without it <c>Changed</c> latches true and every repaint applies.
+        ///
+        /// The fourth is reaching <see cref="InspectorFieldDrawer"/> without a buffer at all. The drawer falls back to
+        /// Unity's own <c>PropertyField</c> when handed a null one -- correct as a fallback, and a silent reversal of
+        /// this whole task if a real call site ever takes it. </summary>
+        private static void CaseInputsCommitOnFocusOut(StringBuilder builder, List<string> failures)
+        {
+            int exceptions = RawInputBudget(failures);
+            int threaded = CommitBufferThreading(failures);
+            DrawerAlwaysGetsACommitBuffer(failures);
+
+            // Changed is the verdict every apply gate above is now guarded by, so nothing outside the buffer may set
+            // it. A public setter would let a caller "fix" a gate failure by asserting the commit happened.
+            System.Reflection.PropertyInfo changed = typeof(FocusOutFields).GetProperty("Changed");
+            Expect(changed != null, "commit: FocusOutFields has no public Changed property (setup)", failures);
+            if (changed != null)
+            {
+                System.Reflection.MethodInfo setter = changed.GetSetMethod(true);
+                Expect(setter == null || !setter.IsPublic,
+                    "commit: FocusOutFields.Changed has a public setter, so a caller can claim a commit that no "
+                    + "control made and every apply gate in the tool would believe it", failures);
+            }
+
+            // And behaviourally, on a fresh buffer: nothing has committed, so nothing may be applied. BeginFrame is
+            // the frame boundary, and a boundary that leaves the verdict standing is the latch described above.
+            FocusOutFields probe = new FocusOutFields();
+            Expect(!probe.Changed, "commit: a FocusOutFields reports a commit before any control has drawn", failures);
+            probe.BeginFrame();
+            Expect(!probe.Changed, "commit: BeginFrame does not clear the previous pass's verdict, so Changed latches "
+                + "true and every later repaint applies whether or not anything committed", failures);
+
+            builder.Append("RCMLEGACYUI ").Append("commit-on-focus-out".PadRight(24))
+                   .Append(threaded).Append(" inspectors buffer their edits to focus-out, with ")
+                   .Append(exceptions).Append(" recorded immediate controls in ")
+                   .Append(allowedRawInput.Length).Append(" files\n");
+        }
+        /// <summary> Every immediate control this tool ships on purpose, with the file it lives in and how many of them
+        /// that file is allowed. Both directions are asserted: a file with more raw inputs than its row fails, and so
+        /// does a file with fewer, because the row IS the decision and a decision nobody recorded reversing should not
+        /// evaporate quietly. A file absent from the table must have none at all.
+        ///
+        /// Three rows, and each is a judgement rather than an oversight:
+        ///
+        /// FocusOutFields.cs is the implementation. Its two raw text fields ARE the deferred control -- the box the
+        /// author types into while the property still holds the old value. Gating them would be gating the fix.
+        ///
+        /// RoadSystemEditor.cs frames the editor's play camera on a bridge: zoom, height, and two rotation axes. They
+        /// are fields on the Editor instance, not on the RoadSystem -- nothing serialises them, no undo step is written,
+        /// no road is rebuilt, and the only thing they move is where the camera stands. Deferring them would mean
+        /// dragging a zoom slider blind and seeing the frame jump once when the button came up, which is worse at the
+        /// only job those four controls have.
+        ///
+        /// SaveWindow.cs is the save dialog: a display name and a description. The name feeds a live readout of the
+        /// exact path about to be written and a warning when a file is already there, both of which exist to answer
+        /// "what am I about to save, and over what" BEFORE the button is pressed. Deferred, they would answer about the
+        /// previous name. Nothing here is serialised, applied, or rebuilt either. </summary>
+        private static readonly string[][] allowedRawInput = new string[][]
+        {
+            new string[] { "FocusOutFields.cs", "2" },
+            new string[] { "RoadSystemEditor.cs", "4" },
+            new string[] { "SaveWindow.cs", "2" }
+        };
+
+
+        /// <summary> Counts the raw typed-or-dragged controls in every editor source file and checks each against the
+        /// table. Returns how many recorded exceptions were found, for the report line.
+        ///
+        /// The whole folder is scanned rather than the author-facing register, and that is deliberate: the register is
+        /// a hand-kept list, and the fault this case exists to catch is a control appearing in a file nobody thought to
+        /// add to a list. </summary>
+        private static int RawInputBudget(List<string> failures)
+        {
+            string folder = InspectorConsistencyDocWriter.EditorScriptFolder();
+            if (!Directory.Exists(folder))
+            {
+                failures.Add("commit: '" + folder + "' does not exist, so no inspector could be scanned");
+                return 0;
+            }
+
+            int recorded = 0;
+            string[] files = Directory.GetFiles(folder, "*.cs", SearchOption.TopDirectoryOnly);
+            for (int f = 0; f < files.Length; f++)
+            {
+                string name = Path.GetFileName(files[f]);
+                string[] lines = CodeLines(name, failures);
+
+                int count = 0;
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (!IsRawInputDraw(lines[i])) { continue; }
+                    count++;
+                    if (Allowance(name) >= 0) { continue; }
+                    failures.Add("commit: " + name + ":" + (i + 1) + " draws a value the author types or drags with "
+                        + "Unity's own control, which commits per keystroke. Draw it through the file's FocusOutFields, "
+                        + "or record the exception in LegacyInspectorGate.allowedRawInput with the reason");
+                }
+
+                int allowed = Allowance(name);
+                if (allowed < 0) { continue; }
+                recorded += count;
+                Expect(count == allowed, "commit: " + name + " is recorded as having " + allowed
+                    + " immediate controls on purpose and now has " + count
+                    + "; update the row in allowedRawInput, with the reason, or put the value back on focus-out",
+                    failures);
+            }
+
+            for (int a = 0; a < allowedRawInput.Length; a++)
+            {
+                Expect(File.Exists(Path.Combine(folder, allowedRawInput[a][0])),
+                    "commit: allowedRawInput records an exception in '" + allowedRawInput[a][0]
+                    + "', which no longer exists", failures);
+            }
+            return recorded;
+        }
+
+
+        /// <summary> How many immediate controls this file is allowed, or -1 when it is allowed none. </summary>
+        private static int Allowance(string file)
+        {
+            for (int a = 0; a < allowedRawInput.Length; a++)
+            {
+                if (allowedRawInput[a][0] != file) { continue; }
+                int allowed;
+                return int.TryParse(allowedRawInput[a][1], out allowed) ? allowed : -1;
+            }
+            return -1;
+        }
+        /// <summary> For every inspector that owns a commit buffer: it must give that buffer a frame boundary, and any
+        /// <c>GUI.changed</c> guard it wraps an apply in must also test the buffer's verdict. Returns how many
+        /// inspectors were checked.
+        ///
+        /// The guard check is written as "every GUI.changed guard that wraps an apply" rather than "the apply gate",
+        /// because there is no way to tell from the source which one an author would call the gate -- and no need to.
+        /// If a guard wraps an apply, a commit frame must be able to get through it; that is true of the first one and
+        /// of any later one somebody adds. A guard that wraps only <c>EditorUtility.SetDirty</c> -- which is what the
+        /// scene-view handlers in these files have -- wraps no apply and is left alone, because missing a SetDirty on a
+        /// commit frame loses nothing: the apply on the same frame dirties the object itself. </summary>
+        private static int CommitBufferThreading(List<string> failures)
+        {
+            string folder = InspectorConsistencyDocWriter.EditorScriptFolder();
+            if (!Directory.Exists(folder)) { return 0; }
+
+            int scanned = 0;
+            string[] files = Directory.GetFiles(folder, "*.cs", SearchOption.TopDirectoryOnly);
+            for (int f = 0; f < files.Length; f++)
+            {
+                string name = Path.GetFileName(files[f]);
+                // This file constructs a buffer of its own, a few lines up, to prove the mechanism starts clean and
+                // that BeginFrame clears it. That probe is a test fixture, not an inspector: it has no repaint, no
+                // apply, and no author looking at it.
+                if (name == "LegacyInspectorGate.cs") { continue; }
+
+                string[] lines = CodeLines(name, failures);
+                string body = string.Join("\n", lines);
+                if (!body.Contains("new FocusOutFields()")) { continue; }
+                scanned++;
+
+                Expect(body.Contains("fields.BeginFrame()"),
+                    "commit: " + name + " owns a FocusOutFields and never calls BeginFrame, so its verdict is never "
+                    + "cleared: Changed latches true at the first commit and every repaint after it applies", failures);
+
+                for (int l = 0; l < lines.Length; l++)
+                {
+                    if (lines[l].IndexOf("if (GUI.changed", System.StringComparison.Ordinal) < 0) { continue; }
+                    if (lines[l].Contains("fields.Changed")) { continue; }
+
+                    bool wrapsAnApply = false;
+                    for (int on = l + 1; on < lines.Length && on < l + 60; on++)
+                    {
+                        if (lines[on].Contains("ApplyModifiedProperties()")) { wrapsAnApply = true; break; }
+                    }
+                    Expect(!wrapsAnApply, "commit: " + name + ":" + (l + 1) + " guards an apply on GUI.changed alone. "
+                        + "On the frame a deferred control commits nothing else reported a change, so GUI.changed is "
+                        + "false and the author's value is dropped at the next Update(). Test fields.Changed too",
+                        failures);
+                }
+            }
+            return scanned;
+        }
+
+
+        /// <summary> Nothing reaches the drawer without a commit buffer. The drawer's null fallback is Unity's own
+        /// PropertyField, which is correct as a fallback and is per-keystroke commits again if a shipped call site ever
+        /// takes it -- and it would take it silently, drawing a control that looks right and behaves the way it did
+        /// before B-19. </summary>
+        private static void DrawerAlwaysGetsACommitBuffer(List<string> failures)
+        {
+            string folder = InspectorConsistencyDocWriter.EditorScriptFolder();
+            if (!Directory.Exists(folder)) { return; }
+
+            string[] files = Directory.GetFiles(folder, "*.cs", SearchOption.TopDirectoryOnly);
+            string[] calls = { "InspectorFieldDrawer.Draw(", "LegacyInspectorShell.Field(",
+                "LegacyInspectorShell.Group(", "LegacyInspectorShell.AllGroups(" };
+            for (int f = 0; f < files.Length; f++)
+            {
+                string name = Path.GetFileName(files[f]);
+                if (name == "LegacyInspectorGate.cs") { continue; }
+
+                string[] lines = CodeLines(name, failures);
+                for (int l = 0; l < lines.Length; l++)
+                {
+                    for (int c = 0; c < calls.Length; c++)
+                    {
+                        if (lines[l].IndexOf(calls[c], System.StringComparison.Ordinal) < 0) { continue; }
+                        Expect(MentionsIdentifier(lines[l], "fields"),
+                            "commit: " + name + ":" + (l + 1) + " reaches the drawer without naming a commit buffer, "
+                            + "so that field falls back to Unity's per-keystroke PropertyField", failures);
+                    }
+                }
+            }
+        }
+        #endregion
+
+
         #region "Reading a source file the way a compiler would, not the way grep does"
         /// <summary> One source file of the editor folder, with its comments blanked.
         ///
@@ -803,6 +1050,32 @@ namespace RoadCityMaster
         private static bool IsRawChoiceDraw(string line)
         {
             return IsRawDraw(line, choiceDraws);
+        }
+
+
+        /// <summary> The spellings by which a value the author TYPES gets drawn by hand, beyond the numeric ones above:
+        /// text, and the vector fields, which are three or four text boxes in a row.
+        ///
+        /// Toggles, popups and object fields are deliberately absent, and their absence is the shape of B-19 rather
+        /// than an omission. A toggle commits on one click, a popup on one selection, an object field on one drop --
+        /// each is already a single completed gesture, so there is no half-finished state for a deferred commit to
+        /// protect. What B-19 is about is a value that passes through nonsense on the way to what the author meant: 3
+        /// and 35 and 350 en route to 3500, or a slider handle sweeping every width between where it started and where
+        /// it is going. Only typing and dragging do that. </summary>
+        private static readonly string[] keystrokeDraws =
+        {
+            "TextField(", "TextArea(", "DelayedTextField(",
+            "Vector2Field(", "Vector3Field(", "Vector4Field("
+        };
+
+
+        /// <summary> Whether this line draws a value the author types or drags with Unity's own immediate control --
+        /// the B-19 question, which is wider than case 1's: case 1 asks whether a REGISTRY field is hand-drawn in one
+        /// of two files, this asks whether ANY typed or dragged value anywhere in the folder still commits per
+        /// keystroke. </summary>
+        private static bool IsRawInputDraw(string line)
+        {
+            return IsRawNumericDraw(line) || IsRawDraw(line, keystrokeDraws);
         }
 
 
