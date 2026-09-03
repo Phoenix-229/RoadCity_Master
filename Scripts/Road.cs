@@ -501,10 +501,31 @@ namespace RoadCityMaster
             }
             else
             {
-                if (isUpdateRequired)
+                // B-14. This flag was the last route into the SYNCHRONOUS build, and it is the route four
+                // author-facing operations still took: creating an intersection (Intersections.cs), rebuilding one
+                // (RoadIntersectionEditor), a node operation (SplineNEditor) and connecting two roads
+                // (SplineC.ActivateEndNodeConnection) all end by setting it. `spline.TriggerSetup()` is
+                // `road.UpdateRoad()` run inline, so all four bypassed RM-100's dispatch and RM-101's supersede: real
+                // work ran on the main thread with nothing named in Background Tasks, which is the state B-14 was
+                // filed about. RM-102 fixed the Road inspector's own rebuilds by funnelling them through
+                // RequestUpdate and left this flag pointing at the old path for every other caller.
+                //
+                // The flag itself stays -- it is public, and an author's own editor script may set it -- but it now
+                // means "ask for a build" rather than "build now, silently". The construction code is the same either
+                // way: RequestUpdate is the queued front door onto UpdateRoad, not a second implementation of it, so
+                // the geometry cannot differ. What changes is that each of the four gets a named, cancellable,
+                // supersede-able ticket instead of an unannounced main-thread build.
+                //
+                // Deliberately not acted on while this road's own queued build is still concluding. Superseding from
+                // inside the step that is finishing would ask a build that completed normally to stop, and its
+                // Background Tasks row would then read as cancelled. The flag is left SET in that case rather than
+                // cleared and dropped: isDispatched is false again on the next tick and the request is still standing.
+                if (isUpdateRequired && !isDispatched)
                 {
                     isUpdateRequired = false;
-                    if (spline != null) { spline.TriggerSetup(); }
+                    // The same null-spline guard the synchronous path carried. A road whose spline has been destroyed
+                    // has nothing to build, and asking would only queue a refusal against its name.
+                    if (spline != null) { RequestUpdate(); }
                 }
             }
 
@@ -540,8 +561,15 @@ namespace RoadCityMaster
                 {
                     editorTimerSpline = 0;
                     isUpdatingSpline = false;
-                    spline.TriggerSetup();
-                    MostRecentNodeCount = spline.nodes.Count;
+                    // B-14. Was `spline.TriggerSetup()`, which is `UpdateRoad()` run inline: a node added or removed
+                    // in the scene view rebuilt the whole road on the main thread with nothing named in Background
+                    // Tasks. The debounce above already collapses a burst of node edits into one fire; going through
+                    // the queued front door adds RM-101's supersede on top, so a fire that lands while this road is
+                    // still building retires that build instead of running a second one beside it.
+                    RequestUpdate();
+                    // One accessor for this field everywhere it is written (OnEnable, Awake, the build path and here),
+                    // so the inspector's "Total nodes" cannot depend on which path last set it.
+                    MostRecentNodeCount = spline.GetNodeCount();
                 }
             }
 
@@ -693,7 +721,17 @@ namespace RoadCityMaster
             int count = 0;
             if (spline != null && spline.nodes != null)
             {
-                count = spline.GetNodeCountNonNull();
+                // B-14. Was `GetNodeCountNonNull()`, compared against a MostRecentNodeCount that every writer fills
+                // from `GetNodeCount()` -- the RAW list length. The two disagree by exactly the number of null entries
+                // in the list, so a spline holding a single destroyed node made this test true on EVERY editor tick,
+                // forever: `isUpdatingSpline` was re-armed each tick and the debounce fired a full main-thread road
+                // rebuild every editorTimerSplineMax ticks for the rest of the session, with nothing in Background
+                // Tasks to say why the editor was busy. Like-for-like now, which is all a change detector needs.
+                //
+                // Nothing is lost by not calling the other one here. Despite its name it is not a counter: it destroys
+                // intersections whose node is gone as it walks the list, and that sweep is what CheckInvalidNodeCount
+                // does from the build path -- so it still happens, from a build rather than from a tick.
+                count = spline.GetNodeCount();
             }
             if (count != MostRecentNodeCount)
             {

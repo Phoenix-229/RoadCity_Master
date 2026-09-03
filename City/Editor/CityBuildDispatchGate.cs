@@ -549,6 +549,64 @@ namespace RoadCityMaster.City.Editor
                     failures);
             }
 
+            // B-14. The front door existing is not the same as it being the only way in, and for four author-facing
+            // operations it was not. `isUpdateRequired` is a public flag on Road; creating an intersection, rebuilding
+            // one, a node operation and connecting two roads all end by setting it, and its consumer inside
+            // AdvanceBuild answered by calling `spline.TriggerSetup()` -- which is `road.UpdateRoad()` run inline. So
+            // real construction ran on the main thread with nothing named in Background Tasks and nothing to cancel,
+            // past both the dispatcher above and RM-101's supersede. The same was true of the node-count debounce in
+            // EditorUpdate. Both now reach RequestUpdate, and these are the assertions that keep them there.
+            //
+            // Asserted on the two method bodies rather than on the whole file because `TriggerSetup` is still legal
+            // elsewhere in Road.cs: ConstructionCleanup uses it to hop to an intersection's PiggyBacks from inside a
+            // build that is already ticketed, which is the one caller that does not need a ticket of its own.
+            string advance = MethodBody(road, "public bool AdvanceBuild");
+            Expect(advance != null, "AdvanceBuild has no body this gate can read", failures);
+            if (advance != null)
+            {
+                Expect(!AppearsInCode(advance, "TriggerSetup", out line),
+                    "the isUpdateRequired consumer still calls TriggerSetup, which is UpdateRoad run inline: an author"
+                    + " operation that sets the flag builds unannounced and uncancellable", failures);
+                Expect(AppearsInCode(advance, "RequestUpdate()", out line),
+                    "the isUpdateRequired consumer no longer reaches the queued front door, so setting the flag asks"
+                    + " for nothing", failures);
+                // The guard is half the fix, not a tidy-up. The staged step delegate RequestUpdate enqueues IS
+                // AdvanceBuild, so consuming the flag from inside a build that is still concluding would supersede
+                // the build that is finishing and report it as cancelled.
+                Expect(AppearsInCode(advance, "isUpdateRequired && !isDispatched", out line),
+                    "the flag is consumed without the !isDispatched guard, so a request arriving mid-build supersedes"
+                    + " the build that is about to finish normally", failures);
+            }
+
+            string tick = MethodBody(road, "private void EditorUpdate");
+            Expect(tick != null, "EditorUpdate has no body this gate can read", failures);
+            if (tick != null)
+            {
+                Expect(!AppearsInCode(tick, "TriggerSetup", out line),
+                    "the node-edit debounce still calls TriggerSetup, so adding or removing a node in the scene view"
+                    + " rebuilds the road on the main thread with nothing named in Background Tasks", failures);
+                Expect(AppearsInCode(tick, "RequestUpdate()", out line),
+                    "the node-edit debounce no longer reaches the queued front door", failures);
+            }
+
+            // And the detector that arms that debounce has to compare like with like. It tested
+            // GetNodeCountNonNull() -- which skips nulls, and destroys intersections as it walks -- against a
+            // MostRecentNodeCount that every writer fills from GetNodeCount(), the raw list length. One destroyed node
+            // made the two disagree permanently, so the debounce re-armed on every editor tick and drove a full
+            // unnamed main-thread rebuild every editorTimerSplineMax ticks for the rest of the session.
+            string detector = MethodBody(road, "private void HierarchyWindowChanged");
+            Expect(detector != null, "HierarchyWindowChanged has no body this gate can read", failures);
+            if (detector != null)
+            {
+                Expect(!AppearsInCode(detector, "GetNodeCountNonNull", out line),
+                    "the node-count change detector compares a null-skipping count against a raw-count field, so a"
+                    + " spline holding one destroyed node rebuilds the road forever", failures);
+            }
+
+            measured.Append("  front door: RequestUpdate; legacy flags routed through it (isUpdateRequired guarded by"
+                + " !isDispatched, EditorUpdate debounce), TriggerSetup left only to ConstructionCleanup's PiggyBacks"
+                + " hop").Append('\n');
+
             // The eight landmarks, in the order a road is built. Named by the mathematics they run rather than by the
             // stage that happens to hold them, because the stage boundaries are exactly what differs between the paths.
             string[] landmarks = new string[]

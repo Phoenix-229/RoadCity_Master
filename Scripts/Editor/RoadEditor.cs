@@ -1490,20 +1490,6 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> The one way this inspector asks for a rebuild. Every site that used to set
-        /// <c>isUpdateRequired</c> or call <c>spline.TriggerSetup()</c> now comes through here, so how a rebuild is
-        /// requested is decided once rather than in three places that had drifted apart.
-        ///
-        /// RM-102 changed what it does, and the change is the point of the task's "rapid edits produce one rebuild
-        /// rather than many" clause. <c>isUpdateRequired</c> was consumed by the editor loop, which called
-        /// <c>spline.TriggerSetup()</c> -> <c>road.UpdateRoad()</c>: the SYNCHRONOUS build. That path predates the
-        /// queue and knows nothing about it, so it bypassed RM-100's dispatch and RM-101's supersede entirely --
-        /// dragging a slider ran a full build per mouse move, on the main thread, each one throwing away the last
-        /// one's result while the editor froze for all of them.
-        ///
-        /// <see cref="LegacyInspectorShell.Rebuild"/> instead defers to the next editor frame (a build started from
-        /// inside OnInspectorGUI runs against a half-drawn layout) and lands on <c>Road.RequestUpdate()</c>, which
-        /// supersedes this road's build in flight rather than starting a second one beside it. </summary>
         /// <summary> RM-109. Reconciles this road against the class it says it is, and offers the one action that
         /// settles the difference.
         ///
@@ -1606,6 +1592,24 @@ namespace RoadCityMaster
         }
 
 
+        /// <summary> The one way THIS INSPECTOR asks for a rebuild. Every control on the Road inspector that starts
+        /// work calls this rather than building for itself, so how a rebuild is requested is decided once here rather
+        /// than at each button that wants one.
+        ///
+        /// RM-102 changed what that means, and the change is the point of the task's "rapid edits produce one rebuild
+        /// rather than many" clause. These sites used to set <c>road.isUpdateRequired</c>, which the editor loop
+        /// consumed by calling <c>spline.TriggerSetup()</c> -> <c>road.UpdateRoad()</c>: the SYNCHRONOUS build. That
+        /// path predates the queue and knows nothing about it, so it bypassed RM-100's dispatch and RM-101's supersede
+        /// entirely -- dragging a slider ran a full build per mouse move, on the main thread, each one throwing away
+        /// the last one's result while the editor froze for all of them.
+        ///
+        /// <see cref="LegacyInspectorShell.Rebuild"/> instead defers to the next editor frame (a build started from
+        /// inside OnInspectorGUI runs against a half-drawn layout) and lands on <c>Road.RequestUpdate()</c>, which
+        /// supersedes this road's build in flight rather than starting a second one beside it.
+        ///
+        /// It is not the only door onto the queue and does not claim to be: <c>isUpdateRequired</c> is public and four
+        /// other author operations still set it. B-14 pointed that flag's consumer in <c>Road.cs</c> at
+        /// <c>RequestUpdate()</c> too, so those reach the same queue by their own route -- not through here. </summary>
         private void TriggerRoadUpdate()
         {
             LegacyInspectorShell.Rebuild(road);
