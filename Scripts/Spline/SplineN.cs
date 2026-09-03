@@ -763,10 +763,17 @@ namespace RoadCityMaster
                 gradeToPrevValue = 0f;
             }
 
-            if (!isEndPoint && !isSpecialEndNode && _nodeCount > 1 && ((idOnSpline + 1) < spline.nodes.Count))
+            // RM-109. The validated index, for the same reason the bridge and tunnel predicates need one: the "previous
+            // node" read below tested only that idOnSpline - 1 was not negative, never that it was inside the list, so a
+            // cached index past the end threw here too. A node that is not on a spline reports no grade rather than
+            // reading a neighbour that is not its own.
+            int gradeIndex = NodeIndex();
+
+            if (!isEndPoint && !isSpecialEndNode && _nodeCount > 1 && gradeIndex >= 0
+                && ((gradeIndex + 1) < spline.nodes.Count))
             {
                 P1 = pos;
-                P2 = spline.nodes[idOnSpline + 1].pos;
+                P2 = spline.nodes[gradeIndex + 1].pos;
 
                 if (isNone)
                 {
@@ -786,10 +793,10 @@ namespace RoadCityMaster
                 gradeToNextValue = 0f;
             }
 
-            if (idOnSpline > 0 && !isSpecialEndNode && _nodeCount > 1 && ((idOnSpline - 1) >= 0))
+            if (gradeIndex > 0 && !isSpecialEndNode && _nodeCount > 1 && gradeIndex < spline.nodes.Count)
             {
                 P1 = pos;
-                P2 = spline.nodes[idOnSpline - 1].pos;
+                P2 = spline.nodes[gradeIndex - 1].pos;
 
                 if (isNone)
                 {
@@ -1447,6 +1454,37 @@ namespace RoadCityMaster
         }
 
 
+        /// <summary> RM-109. This node's real index in the list it belongs to, or -1 when it does not belong to one.
+        ///
+        /// <see cref="idOnSpline"/> is a CACHE, not the truth. <c>SplineC.Setup</c> is what assigns it, from each node's
+        /// position in <c>spline.nodes</c>, so anything reading it between a node being created and the next setup --
+        /// and permanently for a node whose spline was rebuilt shorter without one -- can be handed a slot number that
+        /// does not exist. Every neighbour-reading predicate below then indexes <c>nodes</c> with it, and since those
+        /// predicates are called from <c>OnInspectorGUI</c>, one wrong value throws
+        /// <c>ArgumentOutOfRangeException</c> once per repaint event, for as long as that node stays selected. That is
+        /// the exception an author sees climb into the hundreds while doing nothing but looking at a node.
+        ///
+        /// So the list is asked rather than trusted, and the cache is repaired when it turns out to be wrong: one source
+        /// of truth, and the next caller does not pay for the search. The fast path is a single bounds test plus one
+        /// reference comparison, which is what the cache is worth keeping for.
+        ///
+        /// -1 rather than a throw is the right answer for a predicate: "can this node start a bridge" is truthfully
+        /// answered "no" for a node that is not on a spline at all. </summary>
+        private int NodeIndex()
+        {
+            if (spline == null || spline.nodes == null) { return -1; }
+
+            if (idOnSpline >= 0 && idOnSpline < spline.nodes.Count && spline.nodes[idOnSpline] == this)
+            {
+                return idOnSpline;
+            }
+
+            int found = spline.nodes.IndexOf(this);
+            if (found >= 0) { idOnSpline = found; }
+            return found;
+        }
+
+
         public bool CanBridgeStart()
         {
             if (isBridgeStart)
@@ -1462,33 +1500,40 @@ namespace RoadCityMaster
                 return false;
             }
 
-            int mCount = spline.GetNodeCount();
+            // RM-109. Ask the list, do not trust the cache. Every comparison below is against this node's real position,
+            // so the count and the index can no longer come from two places that disagree.
+            int nodeIndex = NodeIndex();
+            if (nodeIndex < 0) { return false; }
+            int mCount = spline.nodes.Count;
+            SplineN neighbour = null;
 
-            if (idOnSpline > 0)
+            if (nodeIndex > 0)
             {
-                if (spline.nodes[idOnSpline - 1].isBridgeStart)
+                neighbour = spline.nodes[nodeIndex - 1];
+                if (neighbour != null && neighbour.isBridgeStart)
                 {
                     return false;
                 }
             }
 
-            if (idOnSpline < (mCount - 1))
+            if (nodeIndex < (mCount - 1))
             {
-                if (spline.nodes[idOnSpline + 1].isBridgeStart)
+                neighbour = spline.nodes[nodeIndex + 1];
+                if (neighbour != null && neighbour.isBridgeStart)
                 {
                     return false;
                 }
 
                 if (spline.isSpecialEndControlNode)
                 {
-                    if ((mCount - 3 > 0) && idOnSpline == mCount - 3)
+                    if ((mCount - 3 > 0) && nodeIndex == mCount - 3)
                     {
                         return false;
                     }
                 }
                 else
                 {
-                    if ((mCount - 2 > 0) && idOnSpline == mCount - 2)
+                    if ((mCount - 2 > 0) && nodeIndex == mCount - 2)
                     {
                         return false;
                     }
@@ -1519,31 +1564,36 @@ namespace RoadCityMaster
                 return false;
             }
 
-            int mCount = spline.GetNodeCount();
+            // RM-109. Same correction as CanBridgeStart: the walk below starts AT this node's index, so a cached index
+            // past the end of the list threw on the loop's first read rather than merely returning the wrong answer.
+            int nodeIndex = NodeIndex();
+            if (nodeIndex < 0) { return false; }
+            int mCount = spline.nodes.Count;
 
-            if (idOnSpline < (mCount - 1))
+            if (nodeIndex < (mCount - 1))
             {
                 if (spline.isSpecialStartControlNode)
                 {
-                    if (idOnSpline == 2)
+                    if (nodeIndex == 2)
                     {
                         return false;
                     }
                 }
                 else
                 {
-                    if (idOnSpline == 1)
+                    if (nodeIndex == 1)
                     {
                         return false;
                     }
                 }
             }
 
-            for (int i = idOnSpline; i >= 0; i--)
+            for (int i = nodeIndex; i >= 0; i--)
             {
-                if (spline.nodes[i].isBridgeStart)
+                SplineN behind = spline.nodes[i];
+                if (behind != null && behind.isBridgeStart)
                 {
-                    if (!spline.nodes[i].isBridgeMatched)
+                    if (!behind.isBridgeMatched)
                     {
                         return true;
                     }
@@ -1695,33 +1745,40 @@ namespace RoadCityMaster
                 return false;
             }
 
-            int mCount = spline.GetNodeCount();
+            // RM-109. The tunnel predicates carried the identical defect to the bridge ones -- an unbounded cached index
+            // read from a repaint -- and were fixed with it rather than left as the next report.
+            int nodeIndex = NodeIndex();
+            if (nodeIndex < 0) { return false; }
+            int mCount = spline.nodes.Count;
+            SplineN neighbour = null;
 
-            if (idOnSpline > 0)
+            if (nodeIndex > 0)
             {
-                if (spline.nodes[idOnSpline - 1].isTunnelStart)
+                neighbour = spline.nodes[nodeIndex - 1];
+                if (neighbour != null && neighbour.isTunnelStart)
                 {
                     return false;
                 }
             }
 
-            if (idOnSpline < (mCount - 1))
+            if (nodeIndex < (mCount - 1))
             {
-                if (spline.nodes[idOnSpline + 1].isTunnelStart)
+                neighbour = spline.nodes[nodeIndex + 1];
+                if (neighbour != null && neighbour.isTunnelStart)
                 {
                     return false;
                 }
 
                 if (spline.isSpecialEndControlNode)
                 {
-                    if ((mCount - 3 > 0) && idOnSpline == mCount - 3)
+                    if ((mCount - 3 > 0) && nodeIndex == mCount - 3)
                     {
                         return false;
                     }
                 }
                 else
                 {
-                    if ((mCount - 2 > 0) && idOnSpline == mCount - 2)
+                    if ((mCount - 2 > 0) && nodeIndex == mCount - 2)
                     {
                         return false;
                     }
@@ -1752,31 +1809,34 @@ namespace RoadCityMaster
                 return false;
             }
 
-            int nodeCount = spline.GetNodeCount();
+            int nodeIndex = NodeIndex();
+            if (nodeIndex < 0) { return false; }
+            int nodeCount = spline.nodes.Count;
 
-            if (idOnSpline < (nodeCount - 1))
+            if (nodeIndex < (nodeCount - 1))
             {
                 if (spline.isSpecialStartControlNode)
                 {
-                    if (idOnSpline == 2)
+                    if (nodeIndex == 2)
                     {
                         return false;
                     }
                 }
                 else
                 {
-                    if (idOnSpline == 1)
+                    if (nodeIndex == 1)
                     {
                         return false;
                     }
                 }
             }
 
-            for (int i = idOnSpline; i >= 0; i--)
+            for (int i = nodeIndex; i >= 0; i--)
             {
-                if (spline.nodes[i].isTunnelStart)
+                SplineN behind = spline.nodes[i];
+                if (behind != null && behind.isTunnelStart)
                 {
-                    if (!spline.nodes[i].isTunnelMatched)
+                    if (!behind.isTunnelMatched)
                     {
                         return true;
                     }
@@ -1796,10 +1856,14 @@ namespace RoadCityMaster
         /// <summary> Returns true if two of 3 pos Vectors to previous and next 2 nodes approx. match </summary>
         public bool IsStraight()
         {
-            int id1 = idOnSpline - 1;
-            int id2 = idOnSpline + 1;
-            int id3 = idOnSpline + 2;
-            int nodeCount = spline.GetNodeCount();
+            // RM-109. Bounded already, so this one never threw -- but a stale cached index made it compare this node
+            // against neighbours that were not its own and answer "straight" about a stretch of spline it is not on.
+            int nodeIndex = NodeIndex();
+            if (nodeIndex < 0) { return false; }
+            int id1 = nodeIndex - 1;
+            int id2 = nodeIndex + 1;
+            int id3 = nodeIndex + 2;
+            int nodeCount = spline.nodes.Count;
 
             if (id1 > -1 && id1 < nodeCount)
             {

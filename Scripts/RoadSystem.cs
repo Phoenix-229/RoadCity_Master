@@ -5,6 +5,11 @@ using UnityEngine;
 
 namespace RoadCityMaster
 {
+    /// <summary> RM-109. <c>[ExecuteAlways]</c> because everything this component does is authoring work that happens
+    /// outside play mode: adding a road, refreshing every road, finding the single scene camera. Unity does not deliver
+    /// <c>Awake</c>, <c>OnEnable</c>, <c>Start</c> or <c>Update</c> to a MonoBehaviour in edit mode without it, so
+    /// those paths were assuming messages they were never sent. </summary>
+    [ExecuteAlways]
     public class RoadSystem : MonoBehaviour
     {
         #region "Vars"
@@ -21,47 +26,18 @@ namespace RoadCityMaster
         /// shared queue would perform forty transitions a frame, and the queue exists precisely so that a long list of
         /// roads is spread across frames instead of collapsing back into one blocking pass.
         ///
-        /// Two frame sources, because neither covers the other -- <c>Update</c> is the player and play mode, the
-        /// editor's own update is edit mode, where an author clicking Refresh is not in a play session. Since RM-104
-        /// this file names no editor type at all: the subscription goes through <see cref="EngineIntegration"/>, and
-        /// the dispatcher itself never had one, which is what lets a player rebuild a road with the same code. </summary>
+        /// RM-109 narrowed this to play mode, and that narrowing is the point. The queue is static; a driver that lives
+        /// on a scene component can be stopped by that component being absent, disabled, loaded late, or not receiving
+        /// the edit-mode message it relies on -- and a stopped driver does not error, it just leaves every build sitting
+        /// at the head of the queue with a live progress row that never finishes. In the editor the owner is now
+        /// <c>BuildPumpDriver</c>, which is static like the queue and runs from a domain load rather than from a scene.
+        /// This <c>Update</c> is the owner in a player, where there is no such driver and no editor frame to hang one
+        /// off. <c>Application.isPlaying</c> is always true in a player, so the guard costs a player nothing and keeps
+        /// play-in-editor from being pumped twice a frame -- which would otherwise make a build progress at one rate in
+        /// the editor and half that rate in a build. </summary>
         private void Update()
         {
-            City.BuildDispatch.Shared.Pump();
-        }
-
-
-        /// <summary> The editor-side frame source. RM-104 moved the subscription itself behind
-        /// <see cref="EngineIntegration"/>, so this file names no editor type at all: it hands over a callback and
-        /// keeps the token it gets back, which is what makes the removal in <see cref="OnDisable"/> exact. </summary>
-        [System.NonSerialized] private object editorPumpToken;
-
-
-        private void OnEnable()
-        {
-            EngineIntegration.UnsubscribeEditorTick(editorPumpToken);
-            editorPumpToken = EngineIntegration.SubscribeEditorTick(EditorPumpBuilds);
-        }
-
-
-        private void OnDisable()
-        {
-            EngineIntegration.UnsubscribeEditorTick(editorPumpToken);
-            editorPumpToken = null;
-        }
-
-
-        /// <summary> A named method rather than a lambda, because <c>-=</c> on an anonymous delegate removes a different
-        /// instance than <c>+=</c> added and therefore removes nothing -- which is how an editor accumulates one dead
-        /// subscription per domain reload. </summary>
-        private void EditorPumpBuilds()
-        {
-            if (this == null)
-            {
-                EngineIntegration.UnsubscribeEditorTick(editorPumpToken);
-                editorPumpToken = null;
-                return;
-            }
+            if (!Application.isPlaying) { return; }
             City.BuildDispatch.Shared.Pump();
         }
         #endregion
@@ -80,6 +56,17 @@ namespace RoadCityMaster
 
             roadObj.transform.parent = transform;
             Road road = roadObj.AddComponent<Road>();
+
+            // RM-109. Give the new road the real cross-section of the class it says it is, before anything is built
+            // from it. Every road is born declaring appliedRoadClass = UrbanTwoLane, but nothing on this path ever
+            // applied that class's figures, so the road kept whatever the field initialisers happened to say and the
+            // class dropdown was decoration. One call settles lane count, lane and shoulder width, divider, design
+            // speed and grade ceiling together, from the single cited table in City.RoadClassDefaults -- so a two-lane
+            // street arrives 2 x 3.25 m with a 1 m hard strip rather than 1 x 5 m with a 3 m shoulder that looked like
+            // a second lane. The unconditional overload is correct HERE and only here: a road this young has no
+            // authored values to preserve, and a later class change still goes through ChangeType's merge, which keeps
+            // them.
+            road.ApplyRoadClassDefaults();
 
             //Spline:
             GameObject splineObj = new GameObject("Spline");

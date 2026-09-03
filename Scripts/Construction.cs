@@ -65,7 +65,13 @@ namespace RoadCityMaster
             nodeObj.transform.position = RoadNodeGround.Lift(nodeObj.transform.position);
 
             nodeObj.transform.parent = _road.splineObject.transform;
-            node.idOnSpline = _road.spline.GetNodeCount() + 1;
+            // RM-109. The slot this node will occupy, not one past it. `spline.nodes` is 0-based and this node is about
+            // to become its last element, so the next free slot IS the current count; count + 1 names a slot that will
+            // not exist even after the node joins the list. The value is provisional either way -- SplineC.Setup
+            // reassigns every node from its position in `nodes`, which is the only authority -- but until that runs this
+            // is what the node reports, and the bridge, tunnel and grade paths indexed `nodes` with it from inside an
+            // inspector repaint, which is how one bad index became hundreds of identical exceptions.
+            node.idOnSpline = _road.spline.GetNodeCount();
             node.spline = _road.spline;
 
             //Enforce max road grade:

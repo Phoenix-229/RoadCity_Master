@@ -107,17 +107,10 @@ namespace RoadCityMaster.City.Editor
             SceneView.RepaintAll();
         }
 
-        [MenuItem("Window/Road City Master/Alignment/Show the alignment handles", false, 140)]
-        public static void ShowFromMenu() { Show(); }
-
-        [MenuItem("Window/Road City Master/Alignment/Show the alignment handles", true)]
-        public static bool ShowFromMenuValidate() { return !shown; }
-
-        [MenuItem("Window/Road City Master/Alignment/Hide the alignment handles", false, 141)]
-        public static void HideFromMenu() { Hide(); }
-
-        [MenuItem("Window/Road City Master/Alignment/Hide the alignment handles", true)]
-        public static bool HideFromMenuValidate() { return shown; }
+        // RM-108 removed an "Alignment" submenu of four rows: show, hide and their two validators. Same reasoning as the
+        // suitability overlay beside it -- OnSceneGui returns immediately while `plan` is null, and no menu row can set
+        // a plan, so the rows could only ever turn on a tool that drew nothing. The RoadSystem inspector hosts them now,
+        // and only once Plan is non-null. Show(), Hide() and IsShown are unchanged.
 
         /// <summary> One scene repaint: the curvature ribbon along the fitted line, a draggable handle on each authored
         /// corner, then the legend panel on top. The panel comes last for the same reason it does in the overlay -- it

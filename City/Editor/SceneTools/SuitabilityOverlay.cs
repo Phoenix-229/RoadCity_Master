@@ -138,35 +138,15 @@ namespace RoadCityMaster.City.Editor
             SceneView.RepaintAll();
         }
 
-        [MenuItem("Window/Road City Master/Corridor/Show the suitability overlay", false, 100)]
-        public static void ShowFromMenu() { Show(); }
-
-        [MenuItem("Window/Road City Master/Corridor/Show the suitability overlay", true)]
-        public static bool ShowFromMenuValidate() { return !shown; }
-
-        [MenuItem("Window/Road City Master/Corridor/Hide the suitability overlay", false, 101)]
-        public static void HideFromMenu() { Hide(); }
-
-        [MenuItem("Window/Road City Master/Corridor/Hide the suitability overlay", true)]
-        public static bool HideFromMenuValidate() { return shown; }
-
-        [MenuItem("Window/Road City Master/Corridor/Show cost", false, 120)]
-        public static void DisplayCost() { SetDisplay(SuitabilityDisplay.Cost); }
-
-        [MenuItem("Window/Road City Master/Corridor/Show gradient only", false, 121)]
-        public static void DisplaySlope() { SetDisplay(SuitabilityDisplay.Slope); }
-
-        [MenuItem("Window/Road City Master/Corridor/Show earthwork only", false, 122)]
-        public static void DisplayEarthwork() { SetDisplay(SuitabilityDisplay.Earthwork); }
-
-        [MenuItem("Window/Road City Master/Corridor/Show which factor decided each cell", false, 123)]
-        public static void DisplayBinding() { SetDisplay(SuitabilityDisplay.Binding); }
-
-        [MenuItem("Window/Road City Master/Corridor/Show ground this class cannot climb", false, 124)]
-        public static void DisplayForbidden() { SetDisplay(SuitabilityDisplay.Forbidden); }
-
-        [MenuItem("Window/Road City Master/Corridor/Show the corridor band", false, 125)]
-        public static void DisplayCorridor() { SetDisplay(SuitabilityDisplay.Corridor); }
+        // RM-108 removed a "Corridor" submenu of ten rows from Window/Road City Master: show, hide, their two
+        // validators, and one row per display mode. Every one of them was a wrapper of the form `Show()` or
+        // `SetDisplay(SuitabilityDisplay.X)` with a [MenuItem] on it and no other caller, and the whole submenu was
+        // unreachable in the sense that matters: this overlay draws NOTHING until something calls SetMap, and no menu
+        // row can call it, so an author who found "Show the suitability overlay" got an empty scene view and no
+        // explanation. The controls live in the RoadSystem inspector now, in a section that only appears once Map is
+        // non-null -- i.e. once there is a solved surface to look at -- and the six modes are one enum popup rather than
+        // six commands, because they are one choice. Show(), Hide(), SetDisplay(), IsShown and Display are the API that
+        // section drives; nothing about the drawing changed.
 
         /// <summary> The 0..1 quantity a cell contributes to the current display, or a negative number when this cell
         /// has nothing to show in this mode (an off-corridor cell in corridor mode, say) and should not be drawn at all.

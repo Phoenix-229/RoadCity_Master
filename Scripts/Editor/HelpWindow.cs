@@ -11,8 +11,10 @@ namespace RoadCityMaster
     {
         private void OnGUI()
         {
-            EditorStyles.label.wordWrap = true;
-            EditorStyles.miniLabel.wordWrap = true;
+            // RM-109. B-3, B-4. Was two raw assignments to Unity's shared label styles, which stayed wrapped for every
+            // other window for the rest of the session. Same wrap plus a sized label column, both given back on the
+            // next tick (see InspectorTextLayout).
+            InspectorTextLayout.Apply();
 
             // RM-102. This window used to be four buttons and four raw URL labels, all of them pointing at the
             // upstream project's GitHub -- a wiki, a repository and an issue tracker belonging to a third party who

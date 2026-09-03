@@ -58,7 +58,9 @@ namespace RoadCityMaster
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
-            EditorStyles.label.wordWrap = true;
+            // RM-109. B-3, B-4. Was `EditorStyles.label.wordWrap = true` -- a write straight into a style the whole
+            // editor shares, never given back. Same wrap plus a sized label column, restored on the next tick.
+            InspectorTextLayout.Apply();
             
             if(!isInitialized)
             {

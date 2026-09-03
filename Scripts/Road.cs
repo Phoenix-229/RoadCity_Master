@@ -79,9 +79,28 @@ namespace RoadCityMaster
         public bool isUpdatingSpline = false;
 
         //Road editor options:
-        public float laneWidth = 5f;
+        /// <summary> Width of ONE travel lane, metres. Real travel lanes run ~3.0 m (urban local) to ~3.75 m
+        /// (motorway); this initialiser is the <see cref="RoadClassEnum.UrbanTwoLane"/> row of
+        /// <see cref="City.RoadClassDefaults"/>, because that is the class <see cref="appliedRoadClass"/> starts at.
+        ///
+        /// RM-109. It has to be that row and not a number of its own. The legacy initialiser here was 5 m — no real
+        /// travel lane is 5 m wide, and worse, it made a brand-new road DISAGREE with the class it claimed to be. The
+        /// override-preserving merge reads any field that differs from the applied class's default as something the
+        /// author deliberately set, so a 5 m lane on a road that had never been touched was treated as an authored
+        /// choice and survived every later class change. The road could not be talked out of it. </summary>
+        public float laneWidth = 3.25f;
         public bool isShouldersEnabled = true;
-        public float shoulderWidth = 3f;
+        /// <summary> Width of the paved shoulder outside EACH outer lane, metres — the hard strip a vehicle pulls onto
+        /// to clear the travelled way, and the surface that carries the cross-fall down to the ground.
+        ///
+        /// A shoulder is narrower than a lane, and how much narrower is what tells the two apart on sight: ~0.5-1.0 m
+        /// on an urban street (a hard strip, not a refuge), 1.5-2.5 m on a collector or arterial, and 3.0-3.5 m only on
+        /// a highway or motorway, where it must hold a stopped lorry entirely clear of the traffic lane. Those are the
+        /// figures in <see cref="City.RoadClassDefaults"/>, per class, and this initialiser is the UrbanTwoLane row.
+        ///
+        /// RM-109. The legacy initialiser was 3 m against a 5 m lane. 3 m is a full urban lane width, so the shoulder
+        /// read as an extra lane rather than as a shoulder — which is exactly what it looked like in the scene. </summary>
+        public float shoulderWidth = 1f;
         /// <summary> Lanes running the spline's own direction. This carries the value of the old directionless
         /// <c>laneAmount</c> across through <see cref="FormerlySerializedAsAttribute"/>: on a road serialised before
         /// RM-89 the whole TOTAL arrives here and <see cref="lanesBackward"/> arrives as its unsplit sentinel, so

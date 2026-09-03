@@ -168,6 +168,10 @@ namespace RoadCityMaster
 
             serializedObject.Update();
 
+            // RM-109. B-3, B-4. Per repaint, and given back on the next tick -- not once from Init() into settings the
+            // whole editor shares.
+            InspectorTextLayout.Apply();
+
             //Graphic null checks:
             if (!isInitialized)
             {
@@ -1209,7 +1213,6 @@ namespace RoadCityMaster
 
         private void Init()
         {
-            EditorStyles.label.wordWrap = true;
             isInitialized = true;
             string basePath = RoadEditorUtility.GetBasePath();
 

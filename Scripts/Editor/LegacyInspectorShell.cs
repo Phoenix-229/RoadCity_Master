@@ -46,8 +46,29 @@ namespace RoadCityMaster
         /// reads as a build that is running and getting nowhere. </summary>
         public static bool Building(string owner, out bool queued, out float progress)
         {
+            int ahead;
+            return Building(owner, out queued, out progress, out ahead);
+        }
+
+
+        /// <summary> RM-109. B-8. The same, plus how many builds are IN FRONT of this one --
+        /// <paramref name="ahead"/> is the ticket's position in the queue, so 0 means nothing is in front of it.
+        ///
+        /// The distinction is not cosmetic. "Waiting for the build in front of it" is a true and useful sentence for a
+        /// ticket with something in front of it, and a FALSE one for the ticket at the head: if the head of the queue is
+        /// still not running, there is no build in front of it to wait for and the real fault is that nothing is pumping
+        /// the queue at all (B-1). Printing the same sentence for both taught an author to read a stalled pipeline as
+        /// normal queueing. <see cref="City.BuildDispatch.CopyTickets"/> hands the tickets over in queue order, so the
+        /// loop index IS the position and no second query is needed.
+        ///
+        /// An overload rather than a changed signature: the three-argument form is what the RM-102 inspector gate
+        /// asserts against, and callers that only want "is it building" should not have to declare a variable for a
+        /// number they will not read. </summary>
+        public static bool Building(string owner, out bool queued, out float progress, out int ahead)
+        {
             queued = false;
             progress = 0f;
+            ahead = 0;
             if (string.IsNullOrEmpty(owner)) { return false; }
 
             City.BuildDispatch.Shared.CopyTickets(tickets);
@@ -56,6 +77,7 @@ namespace RoadCityMaster
                 if (tickets[i].owner != owner) { continue; }
                 queued = !tickets[i].isRunning;
                 progress = tickets[i].progress;
+                ahead = i;
                 return true;
             }
             return false;
@@ -68,11 +90,27 @@ namespace RoadCityMaster
         {
             bool queued;
             float progress;
-            if (!Building(owner, out queued, out progress)) { return false; }
+            int ahead;
+            if (!Building(owner, out queued, out progress, out ahead)) { return false; }
 
-            string text = queued
-                ? "Queued — waiting for the build in front of it. Editing stays enabled; changes are coalesced."
-                : "Building — " + Mathf.RoundToInt(progress * 100f) + "%. Editing stays enabled; changes are coalesced.";
+            // RM-109. B-8. Three states, not two, and the third is the one that mattered: a queued ticket with nothing
+            // ahead of it. The old line named a build in front of it in every queued case, which is a lie at the head of
+            // the queue and hid a pipeline that was not being driven behind a sentence that read as normal.
+            string text;
+            if (!queued)
+            {
+                text = "Building — " + Mathf.RoundToInt(progress * 100f)
+                    + "%. Editing stays enabled; changes are coalesced.";
+            }
+            else if (ahead > 0)
+            {
+                text = "Queued — " + ahead.ToString() + (ahead == 1 ? " build" : " builds")
+                    + " ahead of it. Editing stays enabled; changes are coalesced.";
+            }
+            else
+            {
+                text = "Queued — next to build. Editing stays enabled; changes are coalesced.";
+            }
             EditorGUILayout.HelpBox(text, MessageType.Info);
             return true;
         }

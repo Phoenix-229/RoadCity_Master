@@ -61,6 +61,11 @@ namespace RoadCityMaster
             {
                 return;
             }
+
+            // RM-109. B-3, B-4. Per repaint, and given back on the next tick. This wizard's three assignments were the
+            // worst of the nine sites: besides the two EditorStyles ones it wrote to `GUI.skin.label`, the ACTIVE SKIN,
+            // from a one-shot setup method -- so opening the wizard once rewrapped label text editor-wide until reload.
+            InspectorTextLayout.Apply();
             if (objectList == null)
             {
                 Close();
@@ -301,10 +306,6 @@ namespace RoadCityMaster
             thumbStyle.normal.background = null;
             thumbStyle.hover.background = null;
             thumbStyle.active.background = null;
-
-            EditorStyles.label.wordWrap = true;
-            EditorStyles.miniLabel.wordWrap = true;
-            GUI.skin.label.wordWrap = true;
         }
 
 

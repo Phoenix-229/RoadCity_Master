@@ -8,11 +8,21 @@ using RoadCityMaster;
 
 namespace RoadCityMaster
 {
-    /// <summary> Provides the menu items inside the editor  </summary>
+    /// <summary> Provides the menu items inside the editor.
+    ///
+    /// RM-108 cut this menu from fourteen top-level rows to five. The rule applied was: a row earns its place in
+    /// Window/Road City Master only if there is nothing an author could select to reach it instead. Creating the first
+    /// road system qualifies -- no RoadSystem exists yet, so no inspector can offer it. Add road, Update all roads and
+    /// Help do not: all three were already buttons in <see cref="RoadSystemEditor"/>, drawn on the object they act on,
+    /// so the menu rows were a second way to press the same button. The methods stay public and unchanged, because the
+    /// inspector, the tests and any author's own editor script call them directly; only the attributes are gone. </summary>
     public class EditorMenu
     {
-        /// <summary> Creates the road system. </summary>
-        [MenuItem("Window/Road City Master/Create road system")]
+        /// <summary> Creates the road system.
+        ///
+        /// Keeps its menu item: this is the one action that cannot come from an inspector, because before it runs there
+        /// is no RoadSystem in the scene to select. </summary>
+        [MenuItem("Window/Road City Master/Create road system", false, 0)]
         public static void CreateRoadSystem()
         {
             Object[] allRoadSystemObjects = EngineIntegration.FindObjectsByType<RoadSystem>();
@@ -29,8 +39,13 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> Add road to gameobject. Not sure if this is necessary. </summary>
-        [MenuItem("Window/Road City Master/Add road")]
+        /// <summary> Add road to gameobject. Not sure if this is necessary.
+        ///
+        /// No menu item: RM-108. The RoadSystem inspector's own "Add road" button calls
+        /// <c>roadSystem.AddRoad()</c> on the system an author has selected, which is both fewer clicks and
+        /// unambiguous about which system gains the road. This entry point differs only in picking the FIRST
+        /// RoadSystem in the scene for you, which is a guess in any scene holding more than one, so it is kept for
+        /// scripted use and no longer offered as a command. </summary>
         public static void AddRoad()
         {
             Object[] allRoadSystemObjects = EngineIntegration.FindObjectsByType<RoadSystem>();
@@ -47,8 +62,9 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> Updates all roads. Used when things get out of sync. </summary>
-        [MenuItem("Window/Road City Master/Update All Roads")]
+        /// <summary> Updates all roads. Used when things get out of sync.
+        ///
+        /// No menu item: RM-108. "Update all roads" is a button in the RoadSystem inspector. </summary>
         public static void UpdateAllRoads()
         {
             Road[] allRoadObjects = EngineIntegration.FindObjectsByType<Road>();
@@ -80,8 +96,12 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> Show the help screen. </summary>
-        [MenuItem("Window/Road City Master/Help")]
+        /// <summary> Show the help screen.
+        ///
+        /// No menu item: RM-108. The RoadSystem inspector draws it as a "Quick help" button beside "Manual", which is
+        /// where an author reads about the object in front of them. The window itself is three paragraphs of
+        /// orientation -- the full text lives in RoadCityMasterManual.html -- so a top-level menu row for it sat beside
+        /// Open Manual offering strictly less. </summary>
         public static void ShowHelpWindow()
         {
             HelpWindow helpWindow = EditorWindow.GetWindow<HelpWindow>();
@@ -186,7 +206,9 @@ namespace RoadCityMaster
         }
 
 
-        [MenuItem("Window/Road City Master/Report a Bug")]
+        /// <summary> Keeps its menu item: a report has to be reachable when the tool is too broken to open an
+        /// inspector, which is exactly when someone needs to send one. </summary>
+        [MenuItem("Window/Road City Master/Report a Bug", false, 101)]
         public static void ReportBug()
         {
             // RM-102. This sent bug reports to the upstream project's issue tracker -- a third party maintaining a

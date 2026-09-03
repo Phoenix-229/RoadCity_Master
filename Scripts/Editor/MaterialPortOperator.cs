@@ -63,8 +63,13 @@ namespace RoadCityMaster
         /// <summary> Built-in Standard's surface-mode float. Absent on URP Lit, so it is read before the swap. </summary>
         private const string ModeProperty = "_Mode";
 
-        private const string MenuDryRun = "Window/Road City Master/Materials/Port to URP -- dry run";
-        private const string MenuConvert = "Window/Road City Master/Materials/Port to URP -- convert in place";
+        // RM-108 folded the three-row "Materials" submenu into "Setup", where the other once-per-project operators
+        // already lived. A submenu of its own implied materials were a place an author works; they are not -- porting to
+        // URP happens once, on import, and never again in a project's life. The priorities are unchanged, so the two
+        // rows keep their order and stay grouped away from the licensing and document rows by Unity's 11-apart
+        // separator rule.
+        private const string MenuDryRun = "Window/Road City Master/Setup/Port to URP -- dry run";
+        private const string MenuConvert = "Window/Road City Master/Setup/Port to URP -- convert in place";
 
         [MenuItem(MenuDryRun, false, 400)]
         public static void DryRunFromMenu()

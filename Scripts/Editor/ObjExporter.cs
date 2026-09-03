@@ -237,8 +237,13 @@ namespace RoadCityMaster
         }
 
 
-        [MenuItem("Window/Road City Master/Export/Export all MeshFilters in selection to separate OBJs")]
-        private static void ExportSelectionToSeparate()
+        // RM-108 removed the four-row "Export" submenu from Window/Road City Master. All three exporters act on
+        // Selection, so they were menu rows that did nothing without a selection and could not say what they would act
+        // on until pressed; the RoadSystem inspector draws them next to a live count of what is selected instead. The
+        // methods widen from private to internal for that: internal and not public because they are UI commands of this
+        // tool's editor assembly, not an export API another package should bind to -- that would make the OBJ writers
+        // below a supported contract, and they are one contributor's wiki code kept as-is.
+        internal static void ExportSelectionToSeparate()
         {
             if (!CreateTargetFolder())
             {
@@ -277,8 +282,7 @@ namespace RoadCityMaster
         }
 
 
-        [MenuItem("Window/Road City Master/Export/Export whole selection to single OBJ")]
-        private static void ExportWholeSelectionToSingle()
+        internal static void ExportWholeSelectionToSingle()
         {
             if (!CreateTargetFolder())
             {
@@ -340,8 +344,7 @@ namespace RoadCityMaster
         }
 
 
-        [MenuItem("Window/Road City Master/Export/Export each selected to single OBJ")]
-        private static void ExportEachSelectionToSingle()
+        internal static void ExportEachSelectionToSingle()
         {
             if (!CreateTargetFolder())
             {
@@ -385,8 +388,10 @@ namespace RoadCityMaster
         }
 
 
-        [MenuItem("Window/Road City Master/Export/Exporters by Hrafnkell Freyr Hlooversson from Unity3D wiki")]
-        private static void OpenLink()
+        /// <summary> The credit link. RM-108 took its [MenuItem] away with the rest of the Export submenu but did NOT
+        /// take the credit away: the RoadSystem inspector draws this as the author line under its export buttons, which
+        /// puts the attribution beside the thing it is attribution for rather than in a menu an author opens once. </summary>
+        internal static void OpenLink()
         {
             // RM-102. The attribution stays -- this exporter is that author's work and the credit is owed. The
             // address had to move: wiki.unity3d.com was retired and the page it named no longer answers, so the

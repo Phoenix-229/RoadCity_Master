@@ -84,9 +84,11 @@ namespace RoadCityMaster
             FinishedBuild outcome;
             while (dispatch.TryTakeOutcome(out outcome)) { Close(outcome); }
 
-            // 2. Open an entry for anything queued or running that has none, and report where it is.
+            // 2. Open an entry for anything queued or running that has none, and report where it is. The index is passed
+            //    because it IS the answer to "where is it": CopyTickets hands them over in queue order, so 0 is the head
+            //    and there is nothing in front of it.
             dispatch.CopyTickets(tickets);
-            for (int i = 0; i < tickets.Count; i++) { Show(tickets[i]); }
+            for (int i = 0; i < tickets.Count; i++) { Show(tickets[i], i); }
 
             // 3. Reap. Only when the dispatcher holds nothing at all, running, queued or uncollected -- at which point
             //    an entry we are still holding cannot be explained by anything still to come, so it is stale: a
@@ -108,7 +110,7 @@ namespace RoadCityMaster
         /// <summary> Open the entry for this ticket if it has none, then say where the build is. A waiting build gets an
         /// entry immediately rather than when its turn comes, because an author who clicked Refresh on five roads asked
         /// for five builds and a panel showing one of them looks like four clicks were lost. </summary>
-        private static void Show(BuildTicket ticket)
+        private static void Show(BuildTicket ticket, int queuePosition)
         {
             Entry entry = Find(ticket.id);
             if (entry == null)
@@ -147,9 +149,18 @@ namespace RoadCityMaster
 
             if (!ticket.isRunning)
             {
+                // RM-109. B-8. Say which of the two waits this is, because they mean opposite things. A build with
+                // others in front of it is waiting normally and the count is the useful part. A build at the HEAD of the
+                // queue has nothing in front of it: if it is still not running, the pump is not being called, and the
+                // old message -- "waiting for the build in front of it", printed for every ticket including the first --
+                // blamed a build that did not exist while the real fault was that nothing was driving the queue at all.
+                //
                 // -1 is Unity's indeterminate bar. Correct for a build that has not started: a 0% bar claims the build
                 // is running and getting nowhere.
-                Progress.Report(entry.progressId, -1f, "waiting for the build in front of it");
+                string wait = queuePosition > 0
+                    ? "queued -- " + queuePosition.ToString() + (queuePosition == 1 ? " build" : " builds") + " ahead"
+                    : "next to build";
+                Progress.Report(entry.progressId, -1f, wait);
                 return;
             }
 
@@ -171,6 +182,12 @@ namespace RoadCityMaster
             if (entry == null) { return; }
 
             shown.Remove(entry);
+
+            // RM-109. B-2. A retired entry's item was REMOVED when the newer build superseded this one, so there is no
+            // item left to give a status to. Returning here is what stops the outcome the dispatcher still reports for a
+            // superseded build -- BuildResult.Cancelled, correctly, from its point of view -- from re-opening a red row
+            // for a build the author never cancelled and never saw start.
+            if (entry.retired) { return; }
 
             switch (outcome.result)
             {
@@ -211,13 +228,19 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> RM-101. Finish the item of every entry for this owner whose build is older than
+        /// <summary> RM-101. Retire the item of every entry for this owner whose build is older than
         /// <paramref name="keepBuildId"/>, and mark it retired.
         ///
-        /// Cancelled, because that is what a superseded build is: the dispatcher records it the same way, and it
-        /// produced no road. Only OLDER ids, because build ids only ever rise -- so this cannot turn into two entries
-        /// retiring each other on alternate frames, which is what a plain "any other entry for this owner" test would
-        /// do if a caller ever queued a second build without superseding the first. </summary>
+        /// RM-109, B-2. REMOVED, not finished as cancelled. A superseded build is not a build that was stopped; it is a
+        /// build that no longer exists, because a newer request for the same road replaced it before it ran. Reporting
+        /// that as `Cancelled` put a red row in Background Tasks for every slider drag and node move, left it there
+        /// until the author found *Clear Inactive*, and made coalescing -- the feature that stops forty builds queueing
+        /// behind one road -- read as the tool aborting the author's work over and over. `Cancelled` is now reserved for
+        /// a stop the author actually asked for, through the panel's own X.
+        ///
+        /// Only OLDER ids, because build ids only ever rise -- so this cannot turn into two entries retiring each other
+        /// on alternate frames, which is what a plain "any other entry for this owner" test would do if a caller ever
+        /// queued a second build without superseding the first. </summary>
         private static void RetireOlder(string owner, int keepBuildId)
         {
             if (string.IsNullOrEmpty(owner)) { return; }
@@ -229,8 +252,31 @@ namespace RoadCityMaster
                 if (entry.buildId >= keepBuildId) { continue; }
                 if (entry.owner != owner) { continue; }
 
-                FinishSafe(entry.progressId, Progress.Status.Canceled);
+                RemoveSafe(entry.progressId);
                 entry.retired = true;
+            }
+        }
+
+
+        /// <summary> Take an item out of the panel altogether, as opposed to finishing it with a status. Unity keeps a
+        /// finished item visible until *Clear Inactive*; a removed one leaves nothing behind, which is what a build that
+        /// was replaced before it ran should leave. Finish first when the item is still live, because Unity will not
+        /// remove a running item -- and swallow the throw either way, since the state this is trying to reach is exactly
+        /// "the item is gone". </summary>
+        private static void RemoveSafe(int progressId)
+        {
+            try
+            {
+                if (!Progress.Exists(progressId)) { return; }
+                if (Progress.GetStatus(progressId) == Progress.Status.Running)
+                {
+                    Progress.Finish(progressId, Progress.Status.Canceled);
+                }
+                if (Progress.Exists(progressId)) { Progress.Remove(progressId); }
+            }
+            catch (System.Exception)
+            {
+                // Nothing actionable: the item is already gone, which is the state this was trying to reach.
             }
         }
 

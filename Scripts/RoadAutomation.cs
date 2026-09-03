@@ -64,7 +64,10 @@ namespace RoadCityMaster.Roads
             nodeObj.transform.parent = _road.splineObject.transform;
 
             //Set the idOnSpline:
-            node.idOnSpline = (splineChildCount + 1);
+            // RM-109. The child count is what the NAME counts from -- Node1 is the first node -- but an index counts
+            // from 0, so the node about to be parented takes slot splineChildCount, not splineChildCount + 1. One
+            // 1-based figure was being used for both, leaving every node created here claiming a slot one past its own.
+            node.idOnSpline = splineChildCount;
             node.spline = _road.spline;
 
             //Make sure isAllowingRoadUpdates is set to false in RS.roadSystem.isAllowingRoadUpdates

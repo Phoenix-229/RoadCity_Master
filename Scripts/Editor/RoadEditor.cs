@@ -188,7 +188,6 @@ namespace RoadCityMaster
         private void Init()
         {
             isInitialized = true;
-            EditorStyles.label.wordWrap = true;
             string basePath = RoadEditorUtility.GetBasePath();
 
             EditorUtilities.LoadTexture(ref refreshButtonTexture, basePath + "/Editor/Icons/refresh2.png");
@@ -310,6 +309,13 @@ namespace RoadCityMaster
 
             serializedObject.Update();
 
+            // RM-109. B-3, B-4. The wrap this inspector's paragraphs need and a label column wide enough for its widest
+            // prefix label, for this pass only. The wrap used to be set once from Init() -- once was enough to leave
+            // every other window in the editor wrapped for the session, and now that the settings are handed back, once
+            // is also not enough to keep OUR text wrapped, so it belongs here, per repaint. The column is what stops
+            // `Gizmo new Node preview Color:` needing a second line and painting over the field below it.
+            InspectorTextLayout.Apply();
+
             isNeedingRoadUpdate = false;
             //Graphic null checks:
             if (!isInitialized)
@@ -364,6 +370,11 @@ namespace RoadCityMaster
             // lane width beside the road-width readout it feeds, shoulder width and max grade beside the toggles that
             // decide whether they mean anything at all, and the terrain match drop with the other terrain controls.
             LegacyInspectorShell.AllGroups(serializedObject, "Road", drawnInPlace);
+
+            // RM-109. The class popup drawn just above is what the road SAYS it is; this is what makes saying it mean
+            // something. Nothing read the choice back out before, so a road could sit at Urban Two Lane with 5 m lanes
+            // and a 3 m shoulder and never be contradicted.
+            DrawRoadClassReconcile();
 
             //Option: Lane and road width:
             LegacyInspectorShell.Field(serializedObject, "Road", "laneWidth", resetLaneWidth);
@@ -1493,6 +1504,108 @@ namespace RoadCityMaster
         /// <see cref="LegacyInspectorShell.Rebuild"/> instead defers to the next editor frame (a build started from
         /// inside OnInspectorGUI runs against a half-drawn layout) and lands on <c>Road.RequestUpdate()</c>, which
         /// supersedes this road's build in flight rather than starting a second one beside it. </summary>
+        /// <summary> RM-109. Reconciles this road against the class it says it is, and offers the one action that
+        /// settles the difference.
+        ///
+        /// Two states need saying and they are different questions. Either the class was CHANGED and not applied yet
+        /// (roadClass has moved away from appliedRoadClass), in which case the author has said what they want and the
+        /// road has not moved -- so applying must KEEP the figures they deliberately overrode, which is what the
+        /// merge's preserveOverrides is for. Or the class was never changed and the cross-section still does not match
+        /// it: an older road, or one tuned by hand. There the LIST is the useful half, because it names every field
+        /// that differs and what the class asks instead, so the button can say what it will do before it is pressed.
+        ///
+        /// What counts as a difference is not decided here: City.RoadTypeChange owns that and the figures come from the
+        /// one cited table, so the inspector cannot show an author one account of their road while the type-change path
+        /// acts on another. A road that already agrees with its class draws nothing at all. </summary>
+        private void DrawRoadClassReconcile()
+        {
+            if (road == null) { return; }
+
+            string className = ObjectNames.NicifyVariableName(road.roadClass.ToString());
+            bool classMoved = road.roadClass != road.appliedRoadClass;
+            System.Collections.Generic.List<City.TypeOverride> rows =
+                City.RoadTypeChange.Overrides(road.TypeState(), road.roadClass, road.roadClass);
+            if (!classMoved && rows.Count == 0) { return; }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.BeginVertical("box");
+            if (classMoved)
+            {
+                string kept = City.RoadTypeChange
+                    .OverrideReport(road.TypeState(), road.appliedRoadClass, road.roadClass).TrimEnd();
+                EditorGUILayout.HelpBox("Class is set to " + className + " but has not been applied yet. Applying "
+                    + "settles lane count, lane width, shoulder width, divider, design speed and grade ceiling "
+                    + "together, from the class table, and keeps anything you had already changed by hand."
+                    + (kept.Length > 0 ? "\n\n" + kept : string.Empty), MessageType.Info);
+                if (GUILayout.Button("Apply " + className + " defaults, keeping my changes"))
+                {
+                    ApplyClassToRoad(true);
+                }
+            }
+            else
+            {
+                EditorGUILayout.LabelField("Cross-section does not match " + className, EditorStyles.boldLabel);
+                DrawClassDifferences(rows, className);
+                if (GUILayout.Button("Adopt the " + className + " cross-section"))
+                {
+                    ApplyClassToRoad(false);
+                }
+            }
+            EditorGUILayout.EndVertical();
+        }
+
+
+        /// <summary> Wrapping row style for the difference list. Owned, built once, and never <c>EditorStyles.label</c>
+        /// itself: that instance belongs to the editor, so switching word wrap on it switches word wrap on for every
+        /// label in every window Unity has open, which is how a two-line prefix ends up painted across the control
+        /// underneath it. </summary>
+        private static GUIStyle classDiffRowStyle;
+
+
+        /// <summary> The per-field list behind the "does not match" panel: what the road has, and what the class asks
+        /// for instead. Conflicts first, because a value outside every band the table sanctions is worth reading before
+        /// one that is merely different. The wording is the panel's own rather than TypeOverride.Message()'s: that
+        /// sentence opens with "kept", which is true of a value carried ACROSS a class change and false here, where
+        /// nothing has been changed and the author is being shown a road that drifted from its own class. </summary>
+        private static void DrawClassDifferences(
+            System.Collections.Generic.List<City.TypeOverride> _rows, string _className)
+        {
+            if (classDiffRowStyle == null)
+            {
+                classDiffRowStyle = new GUIStyle(EditorStyles.label);
+                classDiffRowStyle.wordWrap = true;
+            }
+
+            for (int pass = 0; pass < 2; pass++)
+            {
+                for (int i = 0; i < _rows.Count; i++)
+                {
+                    if (_rows[i].isConflict != (pass == 0)) { continue; }
+                    EditorGUILayout.LabelField((_rows[i].isConflict ? "! " : "• ") + _rows[i].field + " is "
+                        + _rows[i].authorValue + ", " + _className + " asks for " + _rows[i].classDefault,
+                        classDiffRowStyle);
+                }
+            }
+        }
+
+
+        /// <summary> Push the class's figures onto the road and rebuild once.
+        ///
+        /// The two serialization calls around the write are not decoration. This editor reads its properties at the top
+        /// of OnInspectorGUI and writes them back at the end, so a direct field write made in between would be undone
+        /// by that write-back, which still holds the values the properties had. Flushing first commits whatever the
+        /// author typed above; re-reading afterwards means the write-back at the end sends the class figures out rather
+        /// than the ones they replaced. </summary>
+        private void ApplyClassToRoad(bool _preserveOverrides)
+        {
+            serializedObject.ApplyModifiedProperties();
+            Undo.RecordObject(road, "Apply road class defaults");
+            road.ChangeType(road.roadClass, null, _preserveOverrides);
+            EditorUtility.SetDirty(road);
+            serializedObject.Update();
+        }
+
+
         private void TriggerRoadUpdate()
         {
             LegacyInspectorShell.Rebuild(road);

@@ -227,8 +227,6 @@ namespace RoadCityMaster
         private void Init()
         {
             isInitialized = true;
-            EditorStyles.label.wordWrap = true;
-            EditorStyles.miniLabel.wordWrap = true;
             string basePath = RoadEditorUtility.GetBasePath();
 
             EditorUtilities.LoadTexture(ref deleteButtonTexture, basePath + "/Editor/Icons/delete.png");
@@ -334,6 +332,10 @@ namespace RoadCityMaster
             {
                 Init();
             }
+
+            // RM-109. B-3, B-4. Per repaint, and handed back on the next tick. The two assignments this replaces sat in
+            // Init(), so they ran once and leaked Unity's shared label styles for the rest of the session.
+            InspectorTextLayout.Apply();
 
             EditorUtilities.DrawLine();
 
