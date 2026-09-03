@@ -107,11 +107,24 @@ namespace RoadCityMaster
 
             // RM-102. One manual, one button. The pair here was "Online manual" -- the upstream project's wiki, a third
             // party's site documenting a tool this one has diverged from -- beside "Offline manual", which opens ours.
+            //
+            // B-14. "Quick help" is new here, and it is a fix rather than an addition. RM-108 deleted the HelpWindow
+            // menu item on the stated grounds that this inspector already drew this button beside "Manual". It did not:
+            // nothing in the tool called EditorMenu.ShowHelpWindow and nothing else opened HelpWindow, so the window
+            // could not be reached at all -- a whole inspector that an author had no way to tell existed, which is the
+            // exact test this entry applies. EditorMenu.ShowHelpWindow stays the only opener; this is a caller, not a
+            // second copy of it.
             GUILayout.Space(4f);
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Manual", EditorStyles.miniButton, GUILayout.Width(120f)))
             {
                 RoadCityMaster.EditorUtilities.OpenOfflineManual();
             }
+            if (GUILayout.Button("Quick help", EditorStyles.miniButton, GUILayout.Width(120f)))
+            {
+                EditorMenu.ShowHelpWindow();
+            }
+            EditorGUILayout.EndHorizontal();
 
             if (roadSystem.editorPlayCamera == null)
             {

@@ -100,30 +100,30 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> Updates all roads of this RoadSystem </summary>
+        /// <summary> Updates all roads of this RoadSystem: one queued build per road, so each is named in Unity's
+        /// Background Tasks and can be cancelled on its own. </summary>
         public void UpdateAllRoads()
         {
             Road[] allRoadObjs = GetComponentsInChildren<Road>();
             if (allRoadObjs == null || allRoadObjs.Length < 1) { return; }
-            int roadCount = allRoadObjs.Length;
-            SplineC[] piggys = null;
-            if (roadCount > 1)
-            {
-                piggys = new SplineC[roadCount];
-                for (int i = 0; i < roadCount; i++)
-                {
-                    piggys[i] = allRoadObjs[i].spline;
-                }
-            }
 
-            Road road = allRoadObjs[0];
-            if (piggys != null && piggys.Length > 0)
+            // B-14. This handed road[0] a PiggyBacks array holding every spline in the system and requested ONE build.
+            // Two things were wrong with that. The array's first entry was road[0]'s OWN spline, so road[0] was built
+            // twice per press. And the hop from each road to the next happens in `Road.ConstructionCleanup` as
+            // `spline.TriggerSetup()` -> `road.UpdateRoad()` -- the synchronous path, which raises no BuildDispatch
+            // ticket. Forty roads were rebuilt and only the first was ever named in Background Tasks, which is
+            // indistinguishable from a button that did nothing: the report this entry came from. A single null spline
+            // anywhere in the array also made cleanup drop the array and silently abandon every road after it.
+            //
+            // PiggyBacks itself is untouched -- intersections still use it to rebuild the road on the far side of a
+            // junction, which is a different job. The dispatcher is serial (one pending queue, one build in flight), so
+            // these run in order exactly as the chain did, and each road's own Supersede applies to its own ticket.
+            for (int i = 0; i < allRoadObjs.Length; i++)
             {
-                road.PiggyBacks = piggys;
+                // RM-100. Refresh-all and per-road refresh go through the one queued front door, so the two cannot
+                // start builds that interleave -- and so the editor stays usable while a whole system rebuilds.
+                if (allRoadObjs[i] != null) { allRoadObjs[i].RequestUpdate(); }
             }
-            // RM-100. Refresh-all and per-road refresh go through the one queued front door, so the two cannot start
-            // builds that interleave -- and so the editor stays usable while a whole system rebuilds.
-            road.RequestUpdate();
         }
 
 

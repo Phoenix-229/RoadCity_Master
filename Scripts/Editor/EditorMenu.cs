@@ -62,40 +62,6 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> Updates all roads. Used when things get out of sync.
-        ///
-        /// No menu item: RM-108. "Update all roads" is a button in the RoadSystem inspector. </summary>
-        public static void UpdateAllRoads()
-        {
-            Road[] allRoadObjects = EngineIntegration.FindObjectsByType<Road>();
-
-            int roadCount = allRoadObjects.Length;
-
-            Road singleRoad = null;
-            SplineC[] tPiggys = null;
-            if (roadCount > 1)
-            {
-                tPiggys = new SplineC[roadCount - 1];
-            }
-
-            for (int count = 0; count < roadCount; count++)
-            {
-                singleRoad = allRoadObjects[count];
-                if (count > 0)
-                {
-                    tPiggys[count - 1] = singleRoad.spline;
-                }
-            }
-
-            singleRoad = allRoadObjects[0];
-            if (tPiggys != null && tPiggys.Length > 0)
-            {
-                singleRoad.PiggyBacks = tPiggys;
-            }
-            singleRoad.RequestUpdate();
-        }
-
-
         /// <summary> Show the help screen.
         ///
         /// No menu item: RM-108. The RoadSystem inspector draws it as a "Quick help" button beside "Manual", which is

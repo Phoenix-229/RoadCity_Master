@@ -72,6 +72,7 @@ namespace RoadCityMaster
             CaseBuildAwarenessAndCoalescing(builder, failures);
             CaseOneGestureIsOneUndoStep(builder, failures);
             CaseTheCensusCoversEveryDrawnField(builder, failures);
+            CaseEveryWindowHasAWayIn(builder, failures);
 
             foreach (string failure in failures)
             {
@@ -527,6 +528,122 @@ namespace RoadCityMaster
             builder.Append("RCMLEGACYUI ").Append("census-covers-fields".PadRight(24))
                    .Append(covered).Append(" of ").Append(InspectorFieldRegistry.All().Count)
                    .Append(" drawn fields are described in the census\n");
+        }
+        #endregion
+
+
+        #region "Case 9 -- every window this tool ships has a way in (B-14)"
+        /// <summary> An EditorWindow nobody can open is a stub with extra steps, and this is the check that says so.
+        ///
+        /// B-14's test, in the author's words, is whether they *can tell this code exists at all*. HelpWindow failed
+        /// it. RM-108 deleted that window's menu item on the recorded grounds that the RoadSystem inspector already
+        /// offered a "Quick help" button beside "Manual" -- it did not; nothing in the tool called
+        /// <c>EditorMenu.ShowHelpWindow</c>, and no other file opened the type. So a whole window shipped with no way
+        /// in, and nothing complained, because a window that is never opened cannot throw.
+        ///
+        /// The second hop is what this case is really for. HelpWindow's type WAS named outside its own file, in its
+        /// opener, so "is it referenced anywhere" read as clean the whole time it was unreachable. What was missing was
+        /// a caller for the opener, one hop further out, which is why the rows below record both.
+        ///
+        /// The list is hard-coded and its completeness is asserted, which is the same bargain <see
+        /// cref="InspectorStyleOwnershipGate"/> makes with its caller list: a fourth window fails this case until
+        /// somebody writes down how an author reaches it, and writing that down is the point. </summary>
+        private static void CaseEveryWindowHasAWayIn(StringBuilder builder, List<string> failures)
+        {
+            // window, the file whose code opens it, and -- where the opener is a plain static that Unity does not draw
+            // by itself -- the call that has to reach that opener from somewhere else.
+            string[][] ways = new string[][]
+            {
+                new string[] { "HelpWindow", "EditorMenu.cs", "RoadSystemEditor.cs", "EditorMenu.ShowHelpWindow(" },
+                new string[] { "SaveWindow", "SplineNEditor.cs", null, null },
+                new string[] { "Wizard", "SplineNEditor.cs", null, null }
+            };
+
+            List<string> declared = WindowFilesInEditorFolder(failures);
+            Expect(declared.Count == ways.Length,
+                "way-in: the editor folder declares " + declared.Count.ToString() + " EditorWindow types ("
+                + string.Join(", ", declared.ToArray()) + ") and this case records " + ways.Length.ToString()
+                + ". Add the new one with the way an author opens it, or it ships unreachable as HelpWindow did",
+                failures);
+
+            int reachable = 0;
+            for (int w = 0; w < ways.Length; w++)
+            {
+                if (WayInto(ways[w], failures)) { reachable++; }
+            }
+
+            builder.Append("RCMLEGACYUI ").Append("window-has-a-way-in".PadRight(24))
+                   .Append(reachable).Append(" of ").Append(ways.Length)
+                   .Append(" shipped windows can be opened from the tool's own UI\n");
+        }
+
+
+        /// <summary> The EditorWindow types this tool declares, read from the editor folder rather than listed, so the
+        /// completeness check above is an assertion about the folder and not about this file agreeing with itself.
+        /// Comments are blanked first: the prose in these gates names window types constantly. </summary>
+        private static List<string> WindowFilesInEditorFolder(List<string> failures)
+        {
+            List<string> found = new List<string>();
+            string folder = InspectorConsistencyDocWriter.EditorScriptFolder();
+            if (!Directory.Exists(folder)) { return found; }
+
+            string[] files = Directory.GetFiles(folder, "*.cs", SearchOption.TopDirectoryOnly);
+            for (int f = 0; f < files.Length; f++)
+            {
+                string[] lines = CodeLines(Path.GetFileName(files[f]), failures);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    int at = lines[i].IndexOf(": EditorWindow", System.StringComparison.Ordinal);
+                    if (at < 0) { continue; }
+                    int classAt = lines[i].IndexOf("class ", System.StringComparison.Ordinal);
+                    if (classAt < 0 || classAt > at) { continue; }
+
+                    string name = lines[i].Substring(classAt + 6, at - classAt - 6).Trim();
+                    if (name.Length > 0 && name.IndexOf(' ') < 0) { found.Add(name); }
+                }
+            }
+            found.Sort();
+            return found;
+        }
+
+
+        /// <summary> Whether one recorded way in still exists. Two source reads, because the fault being caught is a
+        /// file that stopped CALLING something -- which compiles, runs, and cannot be seen at runtime by anything short
+        /// of an author looking for a button that is not there. </summary>
+        private static bool WayInto(string[] way, List<string> failures)
+        {
+            string window = way[0];
+            string openerFile = way[1];
+            string callerFile = way[2];
+            string call = way[3];
+
+            string[] opener = CodeLines(openerFile, failures);
+            bool opens = false;
+            for (int i = 0; i < opener.Length; i++)
+            {
+                if (opener[i].IndexOf("GetWindow<" + window + ">", System.StringComparison.Ordinal) >= 0)
+                {
+                    opens = true;
+                    break;
+                }
+            }
+            Expect(opens, "way-in: " + openerFile + " no longer opens " + window
+                + ", so nothing in the tool opens it and the window ships unreachable", failures);
+
+            // A window opened from inside another Editor or EditorWindow is reached because Unity draws that class.
+            // Only an opener Unity does NOT draw by itself needs a caller, and that is the row that records one.
+            if (callerFile == null) { return opens; }
+
+            string[] caller = CodeLines(callerFile, failures);
+            bool called = false;
+            for (int i = 0; i < caller.Length; i++)
+            {
+                if (caller[i].IndexOf(call, System.StringComparison.Ordinal) >= 0) { called = true; break; }
+            }
+            Expect(called, "way-in: " + callerFile + " no longer calls " + call + "), so " + window
+                + " has an opener that nothing reaches -- exactly the state RM-108 left it in", failures);
+
+            return opens && called;
         }
         #endregion
 
