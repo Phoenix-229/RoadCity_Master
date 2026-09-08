@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #region "Imports"
 using System;
 #endregion
@@ -59,16 +63,13 @@ namespace RoadCityMaster.City
         /// </summary>
         public static SourceLicence ClassifyByPath(string toolRelativePath)
         {
-            if (string.IsNullOrEmpty(toolRelativePath)) { return SourceLicence.UpstreamMit; }
+            if (string.IsNullOrEmpty(toolRelativePath)) { return SourceLicence.ProprietaryNew; }
             string p = toolRelativePath.Replace('\\', '/').Trim();
             if (p.Length > 0 && p[0] == '/') { p = p.Substring(1); }
-            string lower = p.ToLowerInvariant();
-            if (lower == "city" || lower.StartsWith("city/", StringComparison.Ordinal)
-                || lower.Contains("/city/"))
-            {
-                return SourceLicence.ProprietaryNew;
-            }
-            return SourceLicence.UpstreamMit;
+            int cut = p.LastIndexOf('/');
+            string fileName = cut >= 0 ? p.Substring(cut + 1) : p;
+            return UpstreamProvenanceRule.IsVendorFile(fileName)
+                ? SourceLicence.UpstreamMit : SourceLicence.ProprietaryNew;
         }
 
         /// <summary> Reads what a file's header declares, from its text, by the two anchor phrases. Carrying both is
@@ -76,8 +77,24 @@ namespace RoadCityMaster.City
         public static LicenceHeaderState HeaderStateOf(string fileText)
         {
             if (string.IsNullOrEmpty(fileText)) { return LicenceHeaderState.Missing; }
-            bool hasProp = fileText.Contains(ProprietaryAnchor);
-            bool hasMit = fileText.Contains(MitAnchor);
+            string[] lines = fileText.Split(new[] { '\n' }, StringSplitOptions.None);
+            bool hasProp = false;
+            bool hasMit = false;
+            int limit = lines.Length < 12 ? lines.Length : 12;
+            for (int i = 0; i < limit; i++)
+            {
+                string line = lines[i].TrimStart('\uFEFF', ' ', '\t', '\r');
+                if (line.StartsWith("// New file, authored for this project", StringComparison.Ordinal)
+                    || line == "// authored for this project")
+                {
+                    hasProp = true;
+                }
+                if (line.StartsWith("// Upstream file, MIT licensed", StringComparison.Ordinal)
+                    || line == "// Upstream file, MIT licensed")
+                {
+                    hasMit = true;
+                }
+            }
             if (hasProp && hasMit) { return LicenceHeaderState.Conflicting; }
             if (hasProp) { return LicenceHeaderState.ProprietaryOnly; }
             if (hasMit) { return LicenceHeaderState.MitModifiedOnly; }

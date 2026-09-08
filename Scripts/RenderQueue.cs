@@ -1,4 +1,7 @@
-﻿namespace RoadCityMaster
+// Upstream file, MIT licensed — see RoadCityMaster/LICENSE-MIT.txt
+// Modified for Road & City Master; modifications (c) 2026 <rights holder>.
+// The original MIT notice and permission text are retained and are not superseded by LICENSE.md.
+namespace RoadCityMaster
 {
     // RenderQueue provides ID's for Unity render queues. These can be applied to sub-shader tags,
     // but it's easier to just set material.renderQueue. Static class instead of enum because these

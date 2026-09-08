@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 namespace RoadCityMaster
 {
     /// <summary> One bridge run, or one tunnel run, on a spline: the pair of spline times it starts and ends at.

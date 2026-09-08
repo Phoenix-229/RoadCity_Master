@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 #region "Imports"
 using System.Collections.Generic;
@@ -123,6 +127,10 @@ namespace RoadCityMaster
             Row(f, Component, "regionCentre", "Region centre", FieldGroup.WhatItIs, FieldUnit.Reference,
                 FieldRange.None(),
                 "The Transform the rectangle is measured from. Drag that Transform and the settlement moves with it.");
+            Row(f, Component, "authoredAlignment", "Authored alignment", FieldGroup.WhatItIs,
+                FieldUnit.Reference, FieldRange.None(),
+                "The optional horizontal plan the author owns. A finished corridor may guide it, but the plan remains "
+                + "serialized here until the author installs it as a road.");
             // No range: a rectangle is four numbers and Validate takes one. Its floor is enforced where it can be
             // enforced usefully -- on the Scene handles, by CityAuthoringEditor's own minimum -- because a rectangle
             // dragged to nothing takes its own handles away with it.
@@ -903,8 +911,16 @@ namespace RoadCityMaster
                     + "conductor is strung to and above 8 % is a hot-day or ice-load extreme, not a still-air figure"),
                 "How deeply the cable hangs, as a fraction of the span. It is the one honest authored handle on the "
                 + "curve: the catenary constant is tension over weight, which no author knows, but sag as a share of "
-                + "span is tabulated per conductor. The earth wire reuses this same figure rather than carrying its "
-                + "own.");
+                + "span is tabulated per conductor. The earth wire is a separate mechanical member and has its own "
+                + "ratio below.");
+            Row(f, Run, "settings.electrical.shieldWireSagRatio", "Earth-wire sag ratio",
+                FieldGroup.WhatItIs, FieldUnit.Fraction,
+                FieldRange.Between(0.01, 0.05,
+                    "earth-wire sag is a separate authored cable figure; 1-4 % is the common still-air range for a "
+                    + "shield wire, and the shipped 2 % default sits inside it"),
+                "How deeply the earth wire hangs, as a fraction of its span. It is not copied from the phase "
+                + "conductor: the shield wire has its own mass and stringing tension, so its catenary is solved from "
+                + "this ratio.");
             Row(f, Run, "settings.electrical.minGroundClearanceMetres", "Ground clearance", FieldGroup.WhatItIs,
                 FieldUnit.Metres,
                 FieldRange.Between(5.5, 12.0,

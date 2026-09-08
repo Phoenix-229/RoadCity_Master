@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 #region "Imports"
 using System.Collections.Generic;
@@ -117,7 +121,7 @@ namespace RoadCityMaster
         private static void CaseEverySceneToolHasASwitch(Dictionary<string, string> surfaces, StringBuilder builder,
             List<string> failures)
         {
-            string folder = Path.Combine(DispositionRegister.ToolRoot(), SceneToolFolder);
+            string folder = Path.Combine(DispositionDocWriter.ToolRoot(), SceneToolFolder);
             if (!Directory.Exists(folder))
             {
                 failures.Add("scene-tool-switch: '" + folder + "' does not exist, so no scene tool could be checked");
@@ -332,7 +336,7 @@ namespace RoadCityMaster
         /// </summary>
         private static string DeclaringPath(string file)
         {
-            string sceneTool = Path.Combine(Path.Combine(DispositionRegister.ToolRoot(), SceneToolFolder), file);
+            string sceneTool = Path.Combine(Path.Combine(DispositionDocWriter.ToolRoot(), SceneToolFolder), file);
             return File.Exists(sceneTool)
                 ? sceneTool
                 : Path.Combine(InspectorConsistencyDocWriter.EditorScriptFolder(), file);

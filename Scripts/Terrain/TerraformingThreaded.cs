@@ -1,4 +1,7 @@
-﻿using System.Collections.Generic;
+// Upstream file, MIT licensed — see RoadCityMaster/LICENSE-MIT.txt
+// Modified for Road & City Master; modifications (c) 2026 <rights holder>.
+// The original MIT notice and permission text are retained and are not superseded by LICENSE.md.
+using System.Collections.Generic;
 using UnityEngine;
 
 

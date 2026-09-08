@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 #region "Imports"
 using System;
@@ -168,8 +172,8 @@ namespace RoadCityMaster.City.Editor
         /// <summary> Turn the plan's towers and spans into hanging conductors and earth wires, span-major (every wire of
         /// one span, then the next) so a fixed number of entries is a fixed number of spans and the piece boundaries
         /// fall predictably. The phases reuse the span's ONE solved catenary offset sideways across the arm; the earth
-        /// wire is solved here from the two towers' shield heights at the SAME sag ratio the conductors used -- the
-        /// settled decision not to give the shield wire a sag figure of its own. </summary>
+        /// wire is solved from the two towers' shield heights at its own authored sag ratio because it is a separate
+        /// mechanical member, not another phase conductor. </summary>
         private static void StringSpans(TransmissionLineRunPlan plan, TransmissionTowerClass steel,
             TransmissionLineClass elec, int phaseCount, List<ConductorSpan> conductors, List<ConductorSpan> shields)
         {
@@ -194,7 +198,7 @@ namespace RoadCityMaster.City.Editor
                 float[] fromApex = TowerMeshFactory.ShieldApexOffsets(at, steel.shieldWireCount);
                 float[] toApex = TowerMeshFactory.ShieldApexOffsets(bt, steel.shieldWireCount);
                 Catenary shieldCurve = TransmissionLine.Solve(span.spanMetres, a.shieldWireWorldY, b.shieldWireWorldY,
-                    elec.sagRatio);
+                    elec.shieldWireSagRatio);
                 int wires = Mathf.Min(fromApex.Length, toApex.Length);
                 for (int w = 0; w < wires; w++)
                 {

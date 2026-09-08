@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #region "Imports"
 using System;
 using System.Collections.Generic;
@@ -13,6 +17,7 @@ namespace RoadCityMaster.City
     /// constant (H/w); <see cref="x0"/> is where the curve bottoms out; <see cref="c"/> the vertical offset.
     /// Everything is <c>double</c> and the solver runs a FIXED iteration count, so two bakes cannot disagree in
     /// the last bit (C-06). </summary>
+    [Serializable]
     public struct Catenary
     {
         public double a;
@@ -142,6 +147,7 @@ namespace RoadCityMaster.City
         }
 
         /// <summary> The result of a ground-clearance test on one span. </summary>
+        [Serializable]
         public struct ClearanceResult
         {
             public bool clears;

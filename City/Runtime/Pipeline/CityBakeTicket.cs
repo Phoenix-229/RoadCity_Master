@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #region "Imports"
 using System;
 using UnityEngine;
@@ -113,6 +117,7 @@ namespace RoadCityMaster.City
                 CityBakeReport closing;
                 CityBakeRunner.Finish(walk, out closing);
                 lastReport = closing;
+                lastBus = walk.context != null ? walk.context.bus : null;
                 lastOwner = owner;
             };
 
@@ -138,6 +143,7 @@ namespace RoadCityMaster.City
         private static CityBakeReport lastReport;
 
         private static string lastOwner = string.Empty;
+        private static CityBakeBus lastBus;
 
         /// <summary> Takes the last report and clears the slot. False when there is nothing new to read. </summary>
         public static bool TryTakeReport(out CityBakeReport report, out string owner)
@@ -145,14 +151,26 @@ namespace RoadCityMaster.City
             report = lastReport;
             owner = lastOwner;
             lastReport = null;
+            lastBus = null;
             lastOwner = string.Empty;
             return report != null;
+        }
+
+        /// <summary> Reads one output from the most recently finished bake owned by <paramref name="owner"/>. The
+        /// output remains available until the report is taken, so an inspector can hand the same bake to multiple
+        /// scene tools without making the bus a second persistent data store. </summary>
+        public static bool TryTakeOutput(string owner, string nodeId, string portName, out object value)
+        {
+            value = null;
+            if (lastBus == null || !string.Equals(owner, lastOwner, StringComparison.Ordinal)) { return false; }
+            return lastBus.TryTakeOutput(nodeId, portName, out value);
         }
 
         /// <summary> Drops any report nobody collected, for a test that wants a clean slate. </summary>
         public static void Forget()
         {
             lastReport = null;
+            lastBus = null;
             lastOwner = string.Empty;
         }
         #endregion
@@ -173,7 +191,7 @@ namespace RoadCityMaster.City
             }
 
             if (graph == null) { return "city:none"; }
-            return "city:" + graph.GetInstanceID().ToString();
+            return "city:" + graph.GetEntityId().GetHashCode().ToString();
         }
 
         /// <summary> What Background Tasks calls it. The graph's name, because that is what the author sees in the

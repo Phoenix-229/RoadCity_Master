@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #region "Imports"
 using System;
 using System.Collections.Generic;
@@ -110,6 +114,7 @@ namespace RoadCityMaster.City
     /// different. What it must never do is stay silent, because a 40 m bend on a 90 km/h road looks exactly like a
     /// 400 m one from above. So every curve carries the radius it was given, the radius the speed demanded, and a
     /// sentence saying which of the two it is. </summary>
+    [Serializable]
     public struct AlignmentCurve
     {
         /// <summary> Index into <see cref="HorizontalAlignment.points"/> of the corner this curve rounds. </summary>
@@ -162,6 +167,7 @@ namespace RoadCityMaster.City
     /// each piece handing over to the next at a known point -- and because a sequence is what both consumers want: the
     /// fitter walks it forwards emitting points, and the readout binary-searches it for the piece a station falls in.
     /// </summary>
+    [Serializable]
     public sealed class AlignmentSolution
     {
         public List<AlignmentElement> elements = new List<AlignmentElement>();

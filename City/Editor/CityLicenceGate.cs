@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 #region "Imports"
 using System.Collections.Generic;
@@ -66,9 +70,8 @@ namespace RoadCityMaster.City.Editor
             if (!condition) { failures.Add(message); }
         }
 
-        /// <summary> The path rule returns exactly one licence for every shape of path -- a City segment (however
-        /// nested, whatever case) is proprietary, everything else in the tree is upstream MIT, and an empty path
-        /// never throws. </summary>
+        /// <summary> The provenance rule returns exactly one licence for every path: the frozen vendor filename is MIT,
+        /// every other source is project-authored, and an empty path never throws. </summary>
         private static void CasePathRuleIsTotalAndCorrect(List<string> failures)
         {
             Expect(LicenceRule.ClassifyByPath("City/Runtime/Data/PrefabManifest.cs") == SourceLicence.ProprietaryNew,
@@ -78,13 +81,13 @@ namespace RoadCityMaster.City.Editor
             Expect(LicenceRule.ClassifyByPath("City") == SourceLicence.ProprietaryNew,
                 "the bare City folder must classify proprietary.", failures);
             Expect(LicenceRule.ClassifyByPath("Scripts/Road.cs") == SourceLicence.UpstreamMit,
-                "a vendor Scripts/ file must classify upstream MIT by path.", failures);
-            Expect(LicenceRule.ClassifyByPath("README.md") == SourceLicence.UpstreamMit,
-                "a root file must classify upstream MIT by path.", failures);
-            Expect(LicenceRule.ClassifyByPath("") == SourceLicence.UpstreamMit,
+                "a frozen vendor Scripts/ file must classify upstream MIT by provenance.", failures);
+            Expect(LicenceRule.ClassifyByPath("README.md") == SourceLicence.ProprietaryNew,
+                "an unlisted root file must classify as project-authored.", failures);
+            Expect(LicenceRule.ClassifyByPath("") == SourceLicence.ProprietaryNew,
                 "an empty path must resolve, not throw.", failures);
-            Expect(LicenceRule.ClassifyByPath("Scripts/Cityscape/thing.cs") == SourceLicence.UpstreamMit,
-                "a substring 'City' inside a word must not trigger the proprietary rule.", failures);
+            Expect(LicenceRule.ClassifyByPath("Scripts/Cityscape/thing.cs") == SourceLicence.ProprietaryNew,
+                "an unlisted Scripts/ file must classify as project-authored.", failures);
         }
 
         /// <summary> The header reader tells the four states apart from the two RM-79 anchor phrases: proprietary,
@@ -190,12 +193,18 @@ namespace RoadCityMaster.City.Editor
                 failures);
             Expect(prop > 0, "the proprietary partition must be non-empty (City work exists).", failures);
             Expect(mit > 0, "the upstream-MIT partition must be non-empty (vendor code exists).", failures);
+            Expect(missing == 0, "every source file must carry its expected licence header; missing " + Num(missing),
+                failures);
+            Expect(conflicting == 0, "no source file may carry conflicting licence headers; conflicting "
+                + Num(conflicting), failures);
+            Expect(unreadable == 0, "every source file must be readable for licence verification; unreadable "
+                + Num(unreadable), failures);
 
             sb.AppendLine(Prefix + " tree   files " + Num(total) + "  proprietary " + Num(prop)
                 + "  upstreamMit " + Num(mit));
             sb.AppendLine(Prefix + " header determinate " + Num(determinate) + "  missing " + Num(missing)
                 + "  conflicting " + Num(conflicting) + "  unreadable " + Num(unreadable)
-                + "  (coverage reported; RM-80 writes headers, RM-70 enforces)");
+                + "  (coverage asserted; vendor provenance selects the licence)");
         }
 
         private static string Num(int n) { return n.ToString(CultureInfo.InvariantCulture); }

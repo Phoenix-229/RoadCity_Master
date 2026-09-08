@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 #region "Imports"
 // No bare `using System` on purpose: with UnityEngine imported beside it, `Object` becomes ambiguous, and this file
@@ -135,8 +139,8 @@ namespace RoadCityMaster.City.Editor
         private static void CaseNoNodeFields(StringBuilder builder, List<string> failures)
         {
             List<string> fields = SerializedFieldNames(typeof(CityAuthoring));
-            Expect(fields.Count == 10,
-                "CityAuthoring serialises " + fields.Count + " fields rather than the ten C-9 settled on: "
+            Expect(fields.Count == 11,
+                "CityAuthoring serialises " + fields.Count + " fields rather than the eleven C-9 settled on: "
                 + Join(fields), failures);
 
             HashSet<string> parameters = AllNodeParameterNames();
@@ -147,7 +151,7 @@ namespace RoadCityMaster.City.Editor
                     + " authored in two places", failures);
             }
 
-            Line(builder, "no node fields", "ten serialised fields, none of them the name of a node parameter");
+            Line(builder, "no node fields", "eleven serialised fields, none of them the name of a node parameter");
         }
         #endregion
 
@@ -1681,7 +1685,7 @@ namespace RoadCityMaster.City.Editor
             {
                 ulong citySeed = (ulong)(1000 + s * 7919);
                 ContentResolution resolution = ContentResolver.Resolve(catalog, Category, "lot.probe.1", citySeed);
-                if (!resolution.Resolved) { continue; }
+                if (!resolution.resolved) { continue; }
                 picked.Add(resolution.asset.assetId);
             }
             return picked.Count;

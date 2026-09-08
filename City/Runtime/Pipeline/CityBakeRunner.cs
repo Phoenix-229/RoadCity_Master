@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #region "Imports"
 using System;
 using System.Collections.Generic;
@@ -162,6 +166,15 @@ namespace RoadCityMaster.City
         {
             return !string.IsNullOrEmpty(nodeId) && !string.IsNullOrEmpty(portName)
                    && published.ContainsKey(Key(nodeId, portName));
+        }
+
+        /// <summary> Reads a finished output by node and port without pretending it is an input edge. This is the
+        /// hand-off used by editor tools after a bake; graph nodes continue to use <see cref="TryReadInput"/>. </summary>
+        public bool TryTakeOutput(string nodeId, string portName, out object value)
+        {
+            value = null;
+            if (string.IsNullOrEmpty(nodeId) || string.IsNullOrEmpty(portName)) { return false; }
+            return published.TryGetValue(Key(nodeId, portName), out value);
         }
 
         /// <summary> Reads one input port by following the edge that arrives at it. Returns false, with a sentence,

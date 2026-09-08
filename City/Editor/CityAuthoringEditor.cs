@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
@@ -130,6 +134,8 @@ namespace RoadCityMaster.City.Editor
         {
             CityBakeReport report;
             string owner;
+            string handoff;
+            CityBakeOutputBridge.Apply(city, OwnerKey(city), out handoff);
             if (!CityBakeTicket.TryTakeReport(out report, out owner)) { return; }
             if (report == null) { return; }
             if (!string.Equals(owner, OwnerKey(city), StringComparison.Ordinal)) { return; }
@@ -730,6 +736,19 @@ namespace RoadCityMaster.City.Editor
                 if (GUILayout.Button("Clear", LegacyInspectorShell.CommandButtonStyle())) { ClearBake(city); }
             }
             EditorGUILayout.EndHorizontal();
+
+            using (new EditorGUI.DisabledScope(building || city.authoredAlignment == null
+                || city.authoredAlignment.PointCount < 2))
+            {
+                if (GUILayout.Button("Install authored alignment", LegacyInspectorShell.CommandButtonStyle()))
+                {
+                    ITerrainSurfaceReader reader = TerrainWriteGateway.Active != null
+                        ? TerrainWriteGateway.Active.SurfaceReader : null;
+                    AlignmentInstallResult installed = CityBakeOutputBridge.InstallOwnedAlignment(city, reader,
+                        out lastBakeReport);
+                    lastBakeOk = installed.road != null && installed.nodeCount > 0;
+                }
+            }
 
             DrawScanCommand(city, building);
 
@@ -1381,4 +1400,5 @@ namespace RoadCityMaster.City.Editor
         }
     }
 }
+#endregion
 #endif

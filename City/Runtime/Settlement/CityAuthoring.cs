@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #region "Imports"
 using System.Collections.Generic;
 using UnityEngine;
@@ -119,6 +123,11 @@ namespace RoadCityMaster.City
         /// holds the branch GameObjects, the asset holds the network, blocks, lots and buildings that produced them.
         /// </summary>
         public CityData cityData;
+
+        /// <summary> The author's optional alignment plan. A finished bake may feed a corridor into the scene tools,
+        /// while this serialized plan is the object the author owns when they decide to turn that advice into a road.
+        /// It is kept here so the plan survives a reload instead of living only in a static editor overlay. </summary>
+        public HorizontalAlignment authoredAlignment = new HorizontalAlignment();
 
         // ------------------------------------------------------------------ provenance: written by C-3, read by C-9
 

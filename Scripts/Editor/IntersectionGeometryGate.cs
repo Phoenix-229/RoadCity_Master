@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 #region "Imports"
 using System;
@@ -968,7 +972,7 @@ namespace RoadCityMaster
             ExpectRefused(twoLegs, "a roundabout with two legs", failures);
 
             JunctionRequest tooSmall = ValidRoundaboutRequest();
-            tooSmall.roundabout.inscribedCircleDiameterMetres = 20.0;
+            tooSmall.roundabout.inscribedCircleDiameterMetres = 20.0f;
             ExpectRefused(tooSmall, "a 20 m circle, under the derived minimum", failures);
 
             JunctionRequest tooClose = ValidRoundaboutRequest();

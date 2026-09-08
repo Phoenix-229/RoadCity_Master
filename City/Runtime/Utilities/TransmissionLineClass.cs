@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #region "Imports"
 using System;
 #endregion
@@ -23,9 +27,11 @@ namespace RoadCityMaster.City
     ///   * <see cref="spanLengthMetres"/> -- transmission spans are hundreds of metres (typ. 200-400 m between
     ///     lattice towers), an order of magnitude longer than a streetlight's tens of metres; a valley crossing
     ///     wants a longer span and a hand-placed tower, which is why this is a per-class value, not a constant.
-    ///   * <see cref="sagRatio"/> -- the ONLY honest authored handle on the cable shape. The catenary constant
-    ///     a = H/w (tension over weight) is something no author knows; sag as a fraction of span is a published,
-    ///     tabulated quantity per conductor, ~2-5 % at everyday temperature. Default 0.03 (3 %).
+    ///   * <see cref="sagRatio"/> and <see cref="shieldWireSagRatio"/> -- the honest authored handles on the two
+    ///     cable shapes. The catenary constant a = H/w is something no author knows; sag as a fraction of span is a
+    ///     published, tabulated quantity per conductor. The shield wire is a separate mechanical member, so it gets
+    ///     its own ratio instead of borrowing the phase conductor's value. Defaults are authored selections within
+    ///     the common 2-5 % phase and 1-4 % shield-wire ranges at everyday temperature.
     ///   * <see cref="minGroundClearanceMetres"/> -- statutory HV clearance to ground is real and jurisdictional
     ///     (roughly 6-10 m for sub-transmission over open ground); the default is AUTHORED and per-class.
     ///   * <see cref="angleTowerThresholdDeg"/> -- turn angle at a node beyond which the node needs an angle
@@ -36,6 +42,7 @@ namespace RoadCityMaster.City
         public string conductorName = "AUTHORED-ACSR-generic";
         public float spanLengthMetres = 300f;
         public float sagRatio = 0.03f;
+        public float shieldWireSagRatio = 0.02f;
         public float minGroundClearanceMetres = 7.5f;
         public float angleTowerThresholdDeg = 5f;
 

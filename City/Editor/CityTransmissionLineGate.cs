@@ -1,3 +1,7 @@
+// New file, authored for this project — proprietary
+// Copyright (c) 2026 <rights holder>. All rights reserved.
+// Licensed under the Road & City Master End User Licence Agreement; see LICENSE.md.
+// Not open source. Redistribution of this file, in source or compiled form, is prohibited.
 #if UNITY_EDITOR
 #region "Imports"
 using System;
@@ -50,6 +54,7 @@ namespace RoadCityMaster.City.Editor
             CaseLevelSpanSymmetric(builder, failures);
             CaseInclinedSpanLowPointShifts(builder, failures);
             CaseSagRatioSlackens(builder, failures);
+            CaseShieldWireSagIsIndependent(builder, failures);
             CaseTowerTypeByAngle(builder, failures);
             CaseClearanceFlagged(builder, failures);
             CaseDeterministic(builder, failures);
@@ -124,6 +129,24 @@ namespace RoadCityMaster.City.Editor
             Expect(aSlack < aTight, "sag-ratio: a larger sag ratio did not lower the catenary constant", failures);
             builder.Append("RCMLINE ").Append("sag-ratio".PadRight(22))
                    .Append("larger ratio -> smaller a -> slacker cable\n");
+        }
+
+        /// <summary> The electrical class keeps a separate earth-wire sag figure. A shield wire is a different
+        /// mechanical member, so changing its ratio must change only its solved curve rather than silently following
+        /// the phase conductor's ratio. </summary>
+        private static void CaseShieldWireSagIsIndependent(StringBuilder builder, List<string> failures)
+        {
+            TransmissionLineClass line = TransmissionLineClass.Default();
+            Catenary phase = TransmissionLine.Solve(300.0, 40.0, 40.0, line.sagRatio);
+            Catenary shield = TransmissionLine.Solve(300.0, 40.0, 40.0, line.shieldWireSagRatio);
+            double phaseSag = 40.0 - phase.LowestHeight();
+            double shieldSag = 40.0 - shield.LowestHeight();
+            Expect(line.sagRatio != line.shieldWireSagRatio,
+                "shield-sag: the default phase and earth-wire ratios were not independent", failures);
+            Expect(shieldSag < phaseSag,
+                "shield-sag: the earth-wire curve did not use its own tighter default ratio", failures);
+            builder.Append("RCMLINE ").Append("shield-sag".PadRight(22))
+                   .Append("earth wire uses its own catenary sag ratio\n");
         }
 
         /// <summary> Tower type follows the AUTHORED turn-angle threshold: below is a suspension tower, at or
