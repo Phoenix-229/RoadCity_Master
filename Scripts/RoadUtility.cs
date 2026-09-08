@@ -225,14 +225,8 @@ namespace RoadCityMaster
                 {
                     if (TTD.cX != null && TTD.cY != null)
                     {
-                        TH.x1 = new int[TTD.Count];
-                        System.Array.Copy(TTD.cX, 0, TH.x1, 0, TTD.Count);
-                        TH.y1 = new int[TTD.Count];
-                        System.Array.Copy(TTD.cY, 0, TH.y1, 0, TTD.Count);
-                        TH.height = new float[TTD.Count];
-                        System.Array.Copy(TTD.oldH, 0, TH.height, 0, TTD.Count);
-                        TH.Count = TTD.Count;
-                        TH.heightmapResolution = TTD.TerrainMaxIndex;
+                        // B-17. Merged, not overwritten -- see MergeHeightRecord.
+                        MergeHeightRecord(TH, TTD);
                     }
                 }
                 else
@@ -303,6 +297,80 @@ namespace RoadCityMaster
                     TH.treesCount = 0;
                 }
             }
+        }
+
+
+        /// <summary> B-17. Folds this build's overwritten heights into the road's record, KEEPING THE EARLIEST height
+        /// already held for a cell.
+        ///
+        /// This block used to replace the record outright. Two things followed from that, and one rule fixes both.
+        ///
+        /// The heights a build hands over are <c>oldH</c> -- the heightmap AS IT WAS when this build started. On the
+        /// first build that is the natural ground. On the second it is the first build's embankment, because nothing
+        /// puts the terrain back before a road is re-cut: <see cref="ResetTerrainHistory"/> only drops the record, and
+        /// the restore is a separate, explicit act. So the record of "the ground before the road" was quietly replaced,
+        /// every rebuild, with the ground the road had already made -- which is why a node's floor climbed one build at
+        /// a time (<c>Road.NaturalGroundY</c> reads this record), and why restoring the terrain after two builds could
+        /// never get back to what was there first.
+        ///
+        /// The other half is cells the road has since LEFT. Under replacement they simply fell out of the record while
+        /// staying cut in the terrain, so the restore had nothing to undo them with. A union keeps them.
+        ///
+        /// A record whose resolution no longer matches the terrain's is dropped rather than merged: its indices address
+        /// a heightmap that no longer exists, so there is nothing honest to do with them.
+        ///
+        /// The record therefore grows to cover every corridor this road has ever occupied, and stops growing when the
+        /// road stops moving. That is the size an undo record has to be to be an undo record. </summary>
+        private static void MergeHeightRecord(TerrainHistoryMaker _TH, Terraforming.TempTerrainData _TTD)
+        {
+            int resolution = _TTD.TerrainMaxIndex;
+            if (resolution < 1 || _TTD.oldH == null) { return; }
+
+            int newCount = _TTD.Count;
+            if (newCount > _TTD.cX.Length) { newCount = _TTD.cX.Length; }
+            if (newCount > _TTD.cY.Length) { newCount = _TTD.cY.Length; }
+            if (newCount > _TTD.oldH.Length) { newCount = _TTD.oldH.Length; }
+
+            int oldCount = _TH.Count;
+            if (_TH.x1 == null || _TH.y1 == null || _TH.height == null
+                || _TH.heightmapResolution != resolution)
+            {
+                oldCount = 0;
+            }
+            else
+            {
+                if (oldCount > _TH.x1.Length) { oldCount = _TH.x1.Length; }
+                if (oldCount > _TH.y1.Length) { oldCount = _TH.y1.Length; }
+                if (oldCount > _TH.height.Length) { oldCount = _TH.height.Length; }
+            }
+
+            List<int> cellFirst = new List<int>(oldCount + newCount);
+            List<int> cellSecond = new List<int>(oldCount + newCount);
+            List<float> cellHeight = new List<float>(oldCount + newCount);
+            HashSet<int> recorded = new HashSet<int>();
+
+            //The record already held, first, so its height is the one that survives a repeated cell:
+            for (int index = 0; index < oldCount; index++)
+            {
+                if (!recorded.Add((_TH.x1[index] * resolution) + _TH.y1[index])) { continue; }
+                cellFirst.Add(_TH.x1[index]);
+                cellSecond.Add(_TH.y1[index]);
+                cellHeight.Add(_TH.height[index]);
+            }
+
+            for (int index = 0; index < newCount; index++)
+            {
+                if (!recorded.Add((_TTD.cX[index] * resolution) + _TTD.cY[index])) { continue; }
+                cellFirst.Add(_TTD.cX[index]);
+                cellSecond.Add(_TTD.cY[index]);
+                cellHeight.Add(_TTD.oldH[index]);
+            }
+
+            _TH.x1 = cellFirst.ToArray();
+            _TH.y1 = cellSecond.ToArray();
+            _TH.height = cellHeight.ToArray();
+            _TH.Count = cellFirst.Count;
+            _TH.heightmapResolution = resolution;
         }
 
 
@@ -492,9 +560,21 @@ namespace RoadCityMaster
 
 
         #region "Splat maps"
-        /// <summary> Returns a splat map texture encoded as png </summary>
+        /// <summary> Returns a splat map texture encoded as png, or null when there was nothing to paint on it. B-14:
+        /// this used to return a picture in every case, including the cases where it had painted nothing at all, so the
+        /// button above it could write a file of solid background colour and call it a splat map -- and in one of those
+        /// cases it did not return at all but threw. A null return is the one answer the caller can report honestly, so
+        /// each of the three ways there is nothing to paint gives one:
+        /// no terrain to measure against, a <paramref name="_roadUID"/> that names no road in the scene (the single-road
+        /// branch allocated a one-element array and left the element null, so the loop below dereferenced null), and no
+        /// road anywhere with a built spline to trace. </summary>
         public static byte[] MakeSplatMap(Terrain _terrain, Color _BG, Color _FG, int _width, int _height, float _splatWidth, bool _isSkippingBridge, bool _isSkippingTunnel, string _roadUID = "")
         {
+            if (_terrain == null || _terrain.terrainData == null)
+            {
+                return null;
+            }
+
             Texture2D texture = new Texture2D(_width, _height, TextureFormat.RGB24, false);
 
             //Set background color:
@@ -510,16 +590,22 @@ namespace RoadCityMaster
             Object[] roadObjects;
             if (_roadUID != "")
             {
-                roadObjects = new Object[1];
+                Road single = null;
                 Object[] roads = EngineIntegration.FindObjectsByType<Road>();
                 foreach (Road road in roads)
                 {
                     if (string.CompareOrdinal(road.UID, _roadUID) == 0)
                     {
-                        roadObjects[0] = road;
+                        single = road;
                         break;
                     }
                 }
+                if (single == null)
+                {
+                    Object.DestroyImmediate(texture);
+                    return null;
+                }
+                roadObjects = new Object[] { single };
             }
             else
             {
@@ -527,11 +613,20 @@ namespace RoadCityMaster
             }
 
 
+            int tracedRoadCount = 0;
             Vector3 terrainPos = _terrain.transform.position;
             Vector3 terrainSize = _terrain.terrainData.size;
             foreach (Road road in roadObjects)
             {
                 SplineC spline = road.spline;
+                // A road that has never been built has no spline component or no definition keys on it, and the loop
+                // below reads both without asking. Two keys is the minimum that describes a length of road: the body
+                // walks pairs, i to i + 1.
+                if (spline == null || spline.RoadDefKeysArray == null || spline.RoadDefKeysArray.Length < 2)
+                {
+                    continue;
+                }
+                tracedRoadCount += 1;
                 int tCount = spline.RoadDefKeysArray.Length;
 
                 Vector3 POS1 = default(Vector3);
@@ -673,6 +768,13 @@ namespace RoadCityMaster
             }
 
             texture.Apply();
+            if (tracedRoadCount < 1)
+            {
+                // Nothing was traced onto it, so the picture is the background colour and nothing else. Writing that to
+                // disk would hand the author a file they can only discover is empty by opening it in an image editor.
+                Object.DestroyImmediate(texture);
+                return null;
+            }
             byte[] imageBytes = texture.EncodeToPNG();
             Object.DestroyImmediate(texture);
             return imageBytes;

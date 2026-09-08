@@ -8,15 +8,24 @@ using UnityEngine;
 namespace RoadCityMaster
 {
     /// <summary> RM-51's bridge from the metadata table to a drawn field. A rebuilt inspector calls
-    /// <see cref="Draw"/> per field: it draws the serialised property with the unit appended to its label, then -- if
-    /// the current value is outside the field's real-world range -- shows an inline HelpBox naming the limit and its
-    /// source, rather than clamping silently. This keeps the registry live (RM-66: wired, not dead) while the full
-    /// foldout layout is finished in the scene half. It never renames a serialised field (the non-breaking contract):
-    /// it looks the property up by its verbatim name and only changes how it is presented. </summary>
+    /// <see cref="Draw"/> per field: it draws the serialised property with its unit in a column of its own to the right
+    /// of the value and the field's own sentence on the hover, then -- if the current value is outside the field's
+    /// real-world range -- shows an inline HelpBox naming the limit and its source, rather than clamping silently. This
+    /// keeps the registry live (RM-66: wired, not dead) while the full foldout layout is finished in the scene half. It
+    /// never renames a serialised field (the non-breaking contract): it looks the property up by its verbatim name and
+    /// only changes how it is presented.
+    ///
+    /// B-5, fault 5, moved the unit out of the label. `"Lane width  (m)"` put the unit inside the PREFIX LABEL, where it
+    /// competed with the field's name for the same column and pushed the longest labels onto a second line -- the exact
+    /// overflow B-4 had just widened that column to stop. A unit is not part of a field's name; it annotates the value.
+    /// It is drawn beside the value now, at one shared width
+    /// (<see cref="InspectorTextLayout.UnitColumnWidth"/>), so the tokens line up down the inspector instead of ending
+    /// wherever each label happens to end. Fault 8 put the descriptor's tooltip on the same GUIContent, which is the
+    /// only place an author can be told what a field DOES without spending a row on it. </summary>
     public static class InspectorFieldDrawer
     {
-        /// <summary> Draw one descriptor's serialised property with a unit-suffixed label and inline range validation.
-        /// Returns true if the property was found and drawn.
+        /// <summary> Draw one descriptor's serialised property with its unit in its own column, its own sentence on the
+        /// hover, and inline range validation. Returns true if the property was found and drawn.
         ///
         /// <paramref name="fields"/> is the calling inspector's own <see cref="FocusOutFields"/>, and it carries B-19's
         /// commit rule: see the overload below for what it does and what a null does instead. </summary>
@@ -26,7 +35,8 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> The same field, with <paramref name="trailing"/> drawn on the value's own row, to its right.
+        /// <summary> The same field, with <paramref name="trailing"/> drawn on the value's own row, to the right of the
+        /// unit column.
         ///
         /// RM-102 added this for the legacy inspectors, and the reason is a small piece of accumulated usability that
         /// would otherwise have been lost in the move onto this drawer: each numeric field in those inspectors carried
@@ -51,20 +61,15 @@ namespace RoadCityMaster
             SerializedProperty prop = so.FindProperty(d.field);
             if (prop == null) { return false; }
 
-            string unit = d.UnitLabel();
-            string label = string.IsNullOrEmpty(unit) ? d.label : d.label + "  (" + unit + ")";
-            GUIContent content = new GUIContent(label);
-            if (trailing == null)
-            {
-                DrawValue(prop, content, fields);
-            }
-            else
-            {
-                EditorGUILayout.BeginHorizontal();
-                DrawValue(prop, content, fields);
-                trailing();
-                EditorGUILayout.EndHorizontal();
-            }
+            // Every row opens a horizontal group now, with or without a trailing control, because the unit column is
+            // always there. The two paths this replaces differed only in that group; keeping them apart would have left
+            // two places to change the column in.
+            GUIContent content = new GUIContent(d.label, d.tooltip);
+            EditorGUILayout.BeginHorizontal();
+            DrawValue(prop, content, fields);
+            DrawUnit(d);
+            if (trailing != null) { trailing(); }
+            EditorGUILayout.EndHorizontal();
 
             if (d.range.IsBounded && TryNumeric(prop, out double value))
             {
@@ -91,6 +96,41 @@ namespace RoadCityMaster
         {
             if (fields != null) { fields.Property(prop, content); }
             else { EditorGUILayout.PropertyField(prop, content); }
+        }
+
+
+        /// <summary> B-5, fault 5. The registry path into the unit column: a descriptor knows its own token and its own
+        /// sentence, so it needs no arguments beyond itself.
+        ///
+        /// The tooltip is passed on only when there is a token to hover. On a unitless field the cell is blank, and a
+        /// tooltip that appeared over blank space would be a hover with nothing visible to attribute it to -- which is
+        /// why the empty check lives in <see cref="Unit"/> rather than being repeated at each caller. </summary>
+        private static void DrawUnit(FieldDescriptor d)
+        {
+            Unit(d.UnitLabel(), d.tooltip);
+        }
+
+
+        /// <summary> The unit column itself: one fixed-width cell to the right of a value, holding a unit token or
+        /// nothing. Public because the rebuilt legacy inspectors have numeric controls that are NOT registry fields --
+        /// the terrain clearing widths, the editor camera's speed -- and a second cell written beside them would be a
+        /// second place the column width could drift. They reserve the same cell from this one method.
+        ///
+        /// The cell is reserved even when the token is empty, and that is the point of it rather than an oversight. A
+        /// column that collapsed on the unitless fields -- a lane count, a dropdown -- would leave every reset button in
+        /// the inspector at a different distance from the left, so the eye could not run down the column of buttons the
+        /// way it can down the column of values. An empty cell costs one blank rect and keeps both columns straight.
+        ///
+        /// `EditorStyles.miniLabel` because a unit annotates a value and should not read as loud as the value: the same
+        /// relationship Unity's own inspectors draw with it. The style is READ, never written -- B-3's fault was writing
+        /// to instances the editor owns, and <see cref="InspectorStyleOwnershipGate"/> is what holds that line. </summary>
+        public static void Unit(string token, string tooltip)
+        {
+            GUIContent content = string.IsNullOrEmpty(token)
+                ? GUIContent.none
+                : new GUIContent(token, tooltip);
+            GUILayout.Label(content, EditorStyles.miniLabel,
+                GUILayout.Width(InspectorTextLayout.UnitColumnWidth()));
         }
 
 

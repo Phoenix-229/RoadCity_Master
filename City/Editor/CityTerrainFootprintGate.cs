@@ -17,8 +17,16 @@ namespace RoadCityMaster.City.Editor
     /// narrower; that the blend is a smoothstep that reaches natural height with zero slope at both ends (no
     /// crease) and is monotonic; that the deformed height is flat over the band, blends to natural, then stays
     /// natural; that the splat stops at the paint width, narrow when sealed and wide when unsealed; and that
-    /// everything is bit-identical on repeat (C-06). Wiring into the live terraform writer and the before/after
-    /// screenshots are the deferred half. Report lines are prefixed RCMFOOT. </summary>
+    /// everything is bit-identical on repeat (C-06).
+    ///
+    /// B-14 wired this maths into the live terraform writer -- <c>TerraformingThreaded.DoRectsDo</c> now sizes its
+    /// flattened band from <c>Road.CrossSectionWidth()</c> through <c>FlattenedHalfWidthMetres</c>, where it used
+    /// <c>RoadWidth()</c>, the running lanes alone -- and added the seventh case below for the one thing that wiring
+    /// could break: the terraform's write buffers are sized before the pass from the old reach, so an authored verge
+    /// must be spent INSIDE that reach rather than added past it. The before/after screenshots remain the author's,
+    /// and the writer calling this class at all is asserted as source text by <c>CityBuildProgressGate</c>'s eighth
+    /// sweep -- this file cannot read <c>Road.cs</c>'s widths, since driving them needs a Road on a Terrain.
+    /// Report lines are prefixed RCMFOOT. </summary>
     public static class CityTerrainFootprintGate
     {
         [MenuItem("Window/Road City Master/Testing/City terrain footprint (three widths)")]
@@ -52,6 +60,7 @@ namespace RoadCityMaster.City.Editor
             CaseDeformedHeightProfile(builder, failures);
             CasePaintStopsAtPaintWidth(builder, failures);
             CaseDeterministic(builder, failures);
+            CaseVergeCannotMoveTheOuterBound(builder, failures);
 
             foreach (string failure in failures)
             {
@@ -171,6 +180,101 @@ namespace RoadCityMaster.City.Editor
             Expect(a == b && s1 == s2, "determinism: two identical footprint computations differed", failures);
             builder.Append("RCMFOOT ").Append("determinism".PadRight(22))
                    .Append("identical inputs -> bit-identical height/falloff\n");
+        }
+
+        /// <summary> B-14. The authored verge is spent inside the reach the terraform already had, never added past it.
+        ///
+        /// <c>Terraforming.cs</c> sizes the heightmap write buffers BEFORE the pass runs, from
+        /// <c>matchHeightsDistance</c> and the old lane-only band. The verge widens the flat band, so if it were added
+        /// beyond the old outer reach an author typing a wide enough verge -- or a small enough match distance -- would
+        /// walk the writer past the end of a buffer that was already allocated. Nothing in the writer can notice: by
+        /// then the widths are floats on a worker thread.
+        ///
+        /// So the writer states the bound once, clamps the flat band to it, and gives the batter what is left. This
+        /// case is that arithmetic replicated over a matrix, including a verge absurd enough to swallow the whole bound
+        /// and a match distance small enough to leave the slope nothing -- because the property has to hold for what an
+        /// author can type, not for the widths that happen to ship. It also asserts the verge is genuinely SPENT and
+        /// not quietly discarded, and that the section the band is measured from is wider than the running lanes
+        /// wherever a road has shoulders or a median, which is the substitution B-14 made in the writer. </summary>
+        private static void CaseVergeCannotMoveTheOuterBound(StringBuilder builder, List<string> failures)
+        {
+            double[] carriagewayHalves = { 1.75, 3.5, 7.0, 11.0, 18.0 };
+            double[] verges = { 0.0, 0.5, 0.6, 3.0, 40.0 };
+            double[] matchDistances = { 2.0, 12.0, 40.0, 120.0 };
+            double[] reaches = { 0.0, 8.0, 60.0 };
+            bool boundHeld = true, reachWentNegative = false, clampEverBound = false, batterEverStarved = false;
+            double worstOverrun = 0.0;
+            int combinations = 0;
+
+            foreach (double carriagewayHalf in carriagewayHalves)
+            {
+                foreach (double verge in verges)
+                {
+                    foreach (double matchDistance in matchDistances)
+                    {
+                        foreach (double reach in reaches)
+                        {
+                            combinations++;
+                            TerrainFootprintClass cls = TerrainFootprintClass.Default();
+                            cls.shoulderMetres = (float)verge;
+                            // What RoadWidth() * 0.5f gave, and what the mesh actually emits past it.
+                            double legacyBandHalf = carriagewayHalf;
+                            double sectionHalf = carriagewayHalf + 1.5;
+                            double sep = TerrainFootprint.FlattenedHalfWidthMetres(sectionHalf, cls);
+                            double outerBound = legacyBandHalf + (matchDistance * 0.5);
+                            if (sep > outerBound) { sep = outerBound; clampEverBound = true; }
+                            double batter = reach;
+                            if (batter < 0.0) { batter = 0.0; }
+                            double lookLimit = outerBound - sep;
+                            if (batter > lookLimit) { batter = lookLimit; }
+                            if (batter < 0.0) { reachWentNegative = true; }
+                            if (batter <= 0.0) { batterEverStarved = true; }
+                            double heightSep = sep + batter;
+                            double overrun = heightSep - outerBound;
+                            if (overrun > 1e-9) { boundHeld = false; }
+                            if (overrun > worstOverrun) { worstOverrun = overrun; }
+                        }
+                    }
+                }
+            }
+            Expect(boundHeld, "verge: the flattened band plus the batter reached " + worstOverrun.ToString("0.####")
+                + " m past the outer bound the terraform's write buffers were sized from, so a wide enough authored"
+                + " verge writes past the end of them", failures);
+            Expect(!reachWentNegative, "verge: the batter's remaining reach came out negative, which the writer would"
+                + " hand to the search as a distance", failures);
+            Expect(clampEverBound && batterEverStarved, "verge: no combination in the matrix binds the clamp or starves"
+                + " the slope any more, so this case is asserting the bound only where it was never in doubt", failures);
+
+            // Spent, not discarded: with room to spare, a metre more verge is a metre more flat ground and a metre less
+            // slope. The two have to move together, or the verge is either ignored or being added past the bound.
+            TerrainFootprintClass thin = TerrainFootprintClass.Default();
+            TerrainFootprintClass wide = TerrainFootprintClass.Default();
+            thin.shoulderMetres = 0.5f;
+            wide.shoulderMetres = 2.5f;
+            double bound = 7.0 + (40.0 * 0.5);
+            double sepThin = TerrainFootprint.FlattenedHalfWidthMetres(8.5, thin);
+            double sepWide = TerrainFootprint.FlattenedHalfWidthMetres(8.5, wide);
+            Expect(Math.Abs((sepWide - sepThin) - 2.0) < 1e-9,
+                "verge: 2 m more authored verge did not widen the flat band by 2 m", failures);
+            Expect(Math.Abs(((bound - sepThin) - (bound - sepWide)) - 2.0) < 1e-9,
+                "verge: the metres the flat band gained did not come out of the slope's reach", failures);
+
+            // The band is measured from what the mesh emits. Wherever a road has shoulders or a median that is wider
+            // than the running lanes, and the writer used the running lanes -- which is why the slope used to break
+            // underneath the road's own shoulder.
+            double carriageway = LaneModel.CarriagewayWidth(2, 2, 3.5);
+            double section = LaneModel.CrossSectionWidth(2, 2, 3.5, true, 1.5, 2.0);
+            Expect(Math.Abs((section - carriageway) - 5.0) < 1e-9,
+                "verge: the emitted cross-section is no longer the running lanes plus the median and a shoulder each"
+                + " side, so what the flattened band is measured from has changed underneath this case", failures);
+            Expect(TerrainFootprint.FlattenedHalfWidthMetres(section * 0.5, thin)
+                   > TerrainFootprint.FlattenedHalfWidthMetres(carriageway * 0.5, thin),
+                "verge: a band sized from the emitted section is not wider than one sized from the running lanes",
+                failures);
+
+            builder.Append("RCMFOOT ").Append("verge-inside-bound".PadRight(22))
+                   .Append("flat band + batter <= the old outer reach across ").Append(combinations)
+                   .Append(" width/verge/match/reach combinations\n");
         }
 
         /// <summary> Records a failure when a condition the case demands does not hold. </summary>

@@ -8,7 +8,7 @@ using System.Text;
 
 namespace RoadCityMaster
 {
-    /// <summary> RM-64's verifiable core: the consistency checklist for the fourteen author-facing editor files, as data
+    /// <summary> RM-64's verifiable core: the consistency checklist for the fifteen author-facing editor files, as data
     /// rather than as prose.
     ///
     /// RM-64 asks for one consistency pass over every inspector in <c>Scripts/Editor/</c> and, critically, for "a
@@ -51,7 +51,11 @@ namespace RoadCityMaster
         ComponentInspector,   // a CustomEditor over a component an author selects
         UtilityWindow,        // an EditorWindow: wizard, save, help, progress
         MenuOnly,             // menu items, no drawn layout of its own
-        SharedHelper          // drawing helpers the others call; no inspector of its own
+        SharedHelper,         // drawing helpers the others call; no inspector of its own
+        // B-11. A panel hung on Unity's OWN header for an object that carries no component of ours. It is author-facing
+        // -- it is the only thing that tells an author what a generated mesh is and whether their edit survives -- but it
+        // is not a CustomEditor, so the criteria that assume a component's fields cannot attach to it.
+        HeaderPanel
     }
 
     /// <summary> The four honest answers about a file. RM-64 names two of them -- converted, or deliberately unchanged
@@ -123,7 +127,7 @@ namespace RoadCityMaster
 
     /// <summary> RM-64's first settled convention, as a total function instead of a paragraph. Per-object refusals appear
     /// on the object; the aggregate appears in RM-52's status panel; "never both, never neither" is then a property of
-    /// the mapping rather than a rule someone has to remember while writing the fourteenth inspector. Because the
+    /// the mapping rather than a rule someone has to remember while writing the next inspector. Because the
     /// function is total and single-valued, a gate can assert both halves of that promise in two lines. </summary>
     public static class RefusalRouting
     {
@@ -160,10 +164,19 @@ namespace RoadCityMaster
             "Crest and sag curve length (RM-95)",
             "Placed instance count (RM-45)",
             "Suppressed terrain write count (RM-57)",
-            "Stopping sight distance (RM-95)"
+            "Stopping sight distance (RM-95)",
+            // B-5. The three figures the Road inspector had always printed as bare labels among its editable fields,
+            // which is the fault the register describes: a computed number that looks like a field which has stopped
+            // working. They are drawn through LegacyInspectorShell.Measured now, so they inherit this presentation.
+            "Travelled-way width, running lanes only (RM-89)",
+            "Terrain history store size (RM-102)",
+            "Node count of the most recent build (RM-102)"
         };
 
-        /// <summary> Every measured value the inspectors currently show, each naming the task that computes it. </summary>
+        /// <summary> Every measured value the inspectors currently show, each naming the task it belongs to: the task that
+        /// COMPUTES it where one does, and otherwise -- for a figure the legacy runtime has always worked out for itself --
+        /// the task that brought it under this policy. Both are RM numbers on purpose, because the register is what the
+        /// gate reads; what an entry must never be is a measurement with no task behind it at all. </summary>
         public static IList<string> Known()
         {
             return new List<string>(_known);
@@ -173,11 +186,12 @@ namespace RoadCityMaster
     /// <summary> The checklist itself: one row per author-facing editor file, and the list of files that are deliberately
     /// NOT author-facing so the disk scan has something to subtract. RM-64 said "all fifteen files", and fifteen is what
     /// <c>Scripts/Editor/</c> held once § 10's own tooling -- gates, the suite runner, the field model, the audits, the
-    /// asset porting operators and the document writers -- was set aside. It is fourteen now: RM-101 deleted
-    /// <c>EditorProgressWindow.cs</c>, the modal-bar demo, so the fifteenth file no longer exists to be converted. The
-    /// tooling has grown since RM-64 and will keep growing; the inspectors have not. The gate compares this register
-    /// against the directory, so adding a fifteenth inspector without a row fails the build rather than quietly escaping
-    /// the pass. </summary>
+    /// asset porting operators and the document writers -- was set aside. It went to fourteen when RM-101 deleted
+    /// <c>EditorProgressWindow.cs</c>, the modal-bar demo, and it is fifteen again for a different reason: B-11 added
+    /// <c>GeneratedObjectPanel.cs</c>, which is author-facing without being an inspector over any component of ours.
+    /// The tooling has grown since RM-64 and will keep growing; the inspectors have not. The gate compares this register
+    /// against the directory, so adding a sixteenth author-facing file without a row fails the build rather than quietly
+    /// escaping the pass. </summary>
     public static class InspectorConsistencyChecklist
     {
         private static List<InspectorRecord> _rows;
@@ -190,12 +204,18 @@ namespace RoadCityMaster
         /// editor assembly. That covers the gates, the suite runner, the field model, the audits, the porting operators
         /// and the document writers, and it also covers three shapes that are none of those: <c>BuildPumpDriver.cs</c>,
         /// which is a static frame source with no GUI of any kind, <c>InspectorTextLayout.cs</c>, which draws nothing
-        /// itself -- it sets the wrap flags and the label-column width that the fourteen files below then draw THROUGH
+        /// itself -- it sets the wrap flags and the label-column width that the fifteen files below then draw THROUGH
         /// -- and <c>FocusOutFields.cs</c> (B-19), which is the same shape one level down: it is the CONTROL an author
         /// types into, but it owns no layout, no grouping and no component of its own, and the units and inline
         /// constraints it shows are the descriptor's, handed to it by <c>InspectorFieldDrawer</c>. Asking it for the
         /// five criteria would be asking a text field to persist a foldout. A conversion state for any of the three
-        /// would be a row about a file with no inspector to convert. </summary>
+        /// would be a row about a file with no inspector to convert.
+        ///
+        /// B-11 adds a fourth of that shape: <c>GeneratedObjectProvenance.cs</c> is the name table the generated-object
+        /// header panel reads. Every sentence an author sees in that panel is written there, and it still draws nothing,
+        /// owns no layout and has no component -- it is <c>InspectorTextLayout</c>'s case one step further back, a pure
+        /// function of a string. The file that DRAWS its answers, <c>GeneratedObjectPanel.cs</c>, has a row below.
+        /// </summary>
         private static readonly string[] _notAuthorFacing =
         {
             "ApproachMatchGate.cs",
@@ -211,8 +231,10 @@ namespace RoadCityMaster
             "DispositionRegister.cs",
             "DividedCarriagewayGate.cs",
             "Documentation.cs",
+            "EditorEntryPointGate.cs",
             "FlarePortOperator.cs",
             "FocusOutFields.cs",
+            "GeneratedObjectProvenance.cs",
             "HierarchyConnectionMarker.cs",
             "HierarchyMarkerGate.cs",
             "InspectorConsistencyChecklist.cs",
@@ -235,6 +257,7 @@ namespace RoadCityMaster
             "MaterialPortOperator.cs",
             "MaterialPortRecipes.cs",
             "MaterialPortWriter.cs",
+            "MenuMapRegister.cs",
             "PipelineAudit.cs",
             "PipelineVersionGate.cs",
             "RaoLibraryGate.cs",
@@ -265,13 +288,36 @@ namespace RoadCityMaster
             return new List<string>(_notAuthorFacing);
         }
 
+        /// <summary> The author-facing editor files in the rows above that this project WROTE, rather than inherited.
+        ///
+        /// Until B-11 the two lists were the same list read two ways: every author-facing editor file was also a file
+        /// that arrived in the download, which is why CityUpstreamProvenanceGate can cross-check RM-64's judgement
+        /// against RM-106's provenance record and have each corroborate the other. That coincidence ends the first time
+        /// the tool grows an author-facing editor file of its own -- and B-11's header panel is one, because the objects
+        /// it speaks for carry no component of ours for any inherited inspector to attach to.
+        ///
+        /// So it is named here instead of being quietly filed as tooling. Putting it on _notAuthorFacing would have kept
+        /// the counts matching and been a lie: an author reads its output, which is the only test that list applies. The
+        /// gate subtracts these names and goes on asserting the identity for every other file, so the corroboration
+        /// survives with one recorded exception rather than being weakened into nothing. </summary>
+        private static readonly string[] _newWorkAuthorFacing =
+        {
+            "GeneratedObjectPanel.cs"
+        };
+
+        /// <summary> The new-work author-facing files, for the gate's set arithmetic. </summary>
+        public static IList<string> NewWorkAuthorFacing()
+        {
+            return new List<string>(_newWorkAuthorFacing);
+        }
+
         private static InspectorRecord Row(string file, string target, InspectorKind kind,
             ConversionCriteria applied, string reason, string owner, string note)
         {
             return new InspectorRecord(file, target, kind, applied, reason, owner, note);
         }
 
-        /// <summary> The fourteen rows, built once, in file-name order so the generated document is stable. </summary>
+        /// <summary> The fifteen rows, built once, in file-name order so the generated document is stable. </summary>
         public static IList<InspectorRecord> Rows()
         {
             if (_rows != null) { return new List<InspectorRecord>(_rows); }
@@ -285,11 +331,22 @@ namespace RoadCityMaster
             // RM-101 removed the EditorProgressWindow.cs row along with the file. That window's only content was a
             // seconds field and a button that raised a MODAL progress bar for that many seconds -- a vendor demo, with a
             // private Init() no menu item ever called. It was never an author's inspector, so there is nothing here to
-            // convert and nothing to move to _notAuthorFacing: the file is gone, and the count is fourteen.
+            // convert and nothing to move to _notAuthorFacing: the file is gone, and nothing replaced it. The count
+            // returned to fifteen for an unrelated reason -- B-11's header panel, whose row is below.
 
             r.Add(Row("EditorUtilities.cs", "Shared drawing helpers", InspectorKind.SharedHelper,
                 ConversionCriteria.ProductNameCorrect, "", "RM-102",
                 "The helpers the legacy inspectors draw through. RM-102 routes them at InspectorFieldDrawer, which is where units and inline constraints actually arrive."));
+
+            // B-11. The panel Unity's own GameObject header carries on the tool's generated children. Its row is
+            // DeliberatelyUnchanged rather than converted, and the reason is structural rather than scheduling: the five
+            // criteria describe a component's authored fields, and this panel has none. It edits nothing -- it reports
+            // what an object is, what made it, and whether the next build will overwrite it. The two criteria that CAN
+            // attach to a read-only panel are the ones it carries.
+            r.Add(Row("GeneratedObjectPanel.cs", "Generated objects (Unity's own header)", InspectorKind.HeaderPanel,
+                ConversionCriteria.ProductNameCorrect | ConversionCriteria.FoldoutStatePersisted,
+                "It reports provenance and edits nothing, so three of the five criteria have no field to attach to: there is no authored value to group, none to label with a unit and none to constrain inline. The two that do apply are applied -- the product string, and foldout state kept per type in InspectorFoldoutState rather than on an editor instance Unity destroys at every selection change. B-11's whole point is that these objects carry no component of ours to hang fields on.",
+                "", "The one author-facing file in the pass that is neither a CustomEditor nor an EditorWindow: it draws from Editor.finishedDefaultHeaderGUI."));
 
             r.Add(Row("HelpWindow.cs", "Help", InspectorKind.UtilityWindow,
                 ConversionCriteria.ProductNameCorrect,
@@ -302,16 +359,16 @@ namespace RoadCityMaster
                 "", "See RM-63.7."));
 
             r.Add(Row("RoadEditor.cs", "Road", InspectorKind.ComponentInspector,
-                ConversionCriteria.ProductNameCorrect, "", "RM-102",
-                "The inspector an author lives in. Its fields are already described by RM-51's registry; what is missing is the drawer that reads those descriptors instead of the hand-rolled layout."));
+                ConversionCriteria.All, "", "",
+                "B-5. Grouped by SectionHeader and the RM-51 foldouts at one weight; every numeric field drawn by InspectorFieldDrawer with its unit in its own column; the four computed figures under MeasuredValuePresentation; toggle-governed fields disabled rather than hidden; a tooltip on every control. Sixteen copies of the material row are one MaterialSlot call. The five quick-help panels lost every paragraph that restated a control, since each of those is now that control's hover, and their four header shapes and five reset legends are one RenderHelpHeader and one RenderResetLegend. No control label ends in a colon, which LegacyInspectorGate case 11 holds."));
 
             r.Add(Row("RoadIntersectionEditor.cs", "RoadIntersection", InspectorKind.ComponentInspector,
                 ConversionCriteria.ProductNameCorrect, "", "RM-102",
                 "Also gains RM-97's solved corner radius and sight triangle as MEASURED values, so it must adopt MeasuredValuePresentation rather than draw them as editable floats."));
 
             r.Add(Row("RoadSystemEditor.cs", "RoadSystem", InspectorKind.ComponentInspector,
-                ConversionCriteria.ProductNameCorrect, "", "RM-102",
-                "Carries RM-52's status panel, so it is where the AGGREGATE half of RefusalRouting lands. Per-object refusals must NOT be repeated here."));
+                ConversionCriteria.GroupedVocabulary | ConversionCriteria.ProductNameCorrect, "", "B-22",
+                "B-6 did the grouping: five named sections, one command-button width in one style, sentence-case labels with a tooltip on every control and no colon on any of them (LegacyInspectorGate cases 11 and 12), the saving-meshes warning shared with the Road inspector rather than copied into it, and the camera pick moved out of the repaint into a button so that selecting the object stopped editing the scene. Two criteria are honestly still open rather than vacuously ticked: this file draws no field the registry describes, so no unit column has been earned yet, and it has no foldout to persist. Both arrive with the fifteen commands B-22 brings here, which is also when RM-52's status panel lands -- the AGGREGATE half of RefusalRouting, where the inline-constraint criterion finally has something to present. Per-object refusals must NOT be repeated here."));
 
             r.Add(Row("SaveWindow.cs", "Group save", InspectorKind.UtilityWindow,
                 ConversionCriteria.ProductNameCorrect, "", "RM-102",
@@ -343,8 +400,9 @@ namespace RoadCityMaster
             return new List<InspectorRecord>(_rows);
         }
 
-        /// <summary> How many rows the checklist carries. Fourteen since RM-101 deleted the modal-bar demo window; the
-        /// gate asserts it against the directory rather than against this number. </summary>
+        /// <summary> How many rows the checklist carries. Fifteen: fourteen after RM-101 deleted the modal-bar demo
+        /// window, and fifteen again once B-11 added the generated-object header panel. The gate asserts it against the
+        /// directory rather than against this number. </summary>
         public static int Count { get { return Rows().Count; } }
 
         /// <summary> Rows in one state, for the gate and the document's summary line. </summary>

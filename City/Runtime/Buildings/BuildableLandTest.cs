@@ -85,14 +85,14 @@ namespace RoadCityMaster.City
             verdict.reliefMetres = maxHeight - minHeight;
 
             // --- WATER: absolute reject, ahead of any reshape, so a lot is never reshaped into a dry
-            // sliver perched over a lake. Freeboard is a margin, not a bare comparison against the level.
-            if (!float.IsNegativeInfinity(waterSurfaceY) &&
-                minHeight <= waterSurfaceY + criteria.waterFreeboard)
+            // sliver perched over a lake. The comparison itself lives in WaterRejects, because the site
+            // test (B-15 / C-4) has to apply the same rule to a whole candidate site, and two copies of a
+            // freeboard comparison are two things free to disagree about what counts as dry land.
+            string waterReason;
+            if (WaterRejects(minHeight, waterSurfaceY, criteria, out waterReason))
             {
                 verdict.result = Buildability.Rejected;
-                verdict.reason = "ground at " + minHeight.ToString("F1") + "m is within the " +
-                    criteria.waterFreeboard.ToString("F1") + "m freeboard of the water surface at " +
-                    waterSurfaceY.ToString("F1") + "m";
+                verdict.reason = waterReason;
                 return verdict;
             }
 
@@ -167,7 +167,40 @@ namespace RoadCityMaster.City
             }
             return verdict;
         }
-        // APPEND-MARKER
+        /// <summary> THE water rule, in one place: ground within the authored freeboard of the water surface
+        /// is not buildable land, and a world with no water (<see cref="float.NegativeInfinity"/>) rejects
+        /// nothing. Freeboard is a margin rather than a bare comparison against the level, because a pad
+        /// level with a lake is a pad that floods.
+        ///
+        /// It takes the LOWEST ground of whatever is being judged -- a lot here, a candidate site in B-15's
+        /// site test -- because the lowest point is the one the water reaches first. Public so that both
+        /// callers apply the same comparison and report it in the same words; the alternative was a second
+        /// freeboard test in the city layer, free to drift from this one. </summary>
+        public static bool WaterRejects(float lowestGroundY, float waterSurfaceY,
+            BuildabilityCriteria criteria, out string reason)
+        {
+            if (float.IsNegativeInfinity(waterSurfaceY) || float.IsNaN(waterSurfaceY)
+                || float.IsPositiveInfinity(waterSurfaceY))
+            {
+                reason = string.Empty;
+                return false;
+            }
+            if (float.IsNaN(lowestGroundY) || float.IsInfinity(lowestGroundY))
+            {
+                reason = "the ground here could not be read, so it cannot be shown to stand clear of the " +
+                    "water surface at " + waterSurfaceY.ToString("F1") + "m";
+                return true;
+            }
+            if (lowestGroundY > waterSurfaceY + criteria.waterFreeboard)
+            {
+                reason = string.Empty;
+                return false;
+            }
+            reason = "ground at " + lowestGroundY.ToString("F1") + "m is within the " +
+                criteria.waterFreeboard.ToString("F1") + "m freeboard of the water surface at " +
+                waterSurfaceY.ToString("F1") + "m";
+            return true;
+        }
 
         /// <summary> The slope remedy: clip the lot by a single half-plane that removes the steep
         /// region and keeps the buildable side, and hand back the remnant plus its fresh samples when

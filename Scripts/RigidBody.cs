@@ -5,12 +5,18 @@ using UnityEngine;
 
 namespace RoadCityMaster
 {
+    /// <summary> Strips the <c>Rigidbody</c> off whatever it is attached to, the moment that object wakes.
+    /// <c>Scripts/IntersectionObjects.cs:499</c> adds this component to a built intersection object, and the two lines
+    /// below are the whole of what it does.
+    ///
+    /// It used to carry a forced-sleeping experiment as well -- <c>minCollisionVelocity</c>, two commented field
+    /// declarations, and a fifty-seven-line <c>/* */</c> block that read all three. RM-66 recorded the field and that
+    /// block as ONE disposition group with all four searches negative, and B-21 performed the removal: the field was
+    /// serialised into no prefab, scene or asset in the tree, and its only read was inside the comment. What is left
+    /// is live, not a stub. </summary>
     public class RigidBody : MonoBehaviour
     {
-        public float minCollisionVelocity = 2f;
-        //bool isForcedSleeping = false;
         private Rigidbody rigidBody;
-        //bool isIgnoringRigidBody = false;
 
 
         private void Awake()
@@ -18,64 +24,5 @@ namespace RoadCityMaster
             rigidBody = transform.GetComponent<Rigidbody>();
             DestroyImmediate(rigidBody);
         }
-
-
-        /*
-        private void OnCollisionEnter(Collision collision)
-        {
-            if ( isIgnoringRigidBody || !isForcedSleeping )
-            {
-                return;
-            }
-            Debug.Log( collision.relativeVelocity.magnitude );
-            if ( rigidbody != null )
-            {
-                if ( collision.relativeVelocity.magnitude <= minCollisionVelocity )
-                {
-                    rigidbody.Sleep();
-                }
-                else
-                {
-                    //RB.isKinematic = false;
-                    isForcedSleeping = false;
-                    //RB.AddForce(collision.relativeVelocity*collision.relativeVelocity.magnitude*(RB.mass*0.3f));
-                }
-            }
-        }
-
-
-        private void OnCollisionExit(Collision collisionInfo)
-        {
-            if ( isIgnoringRigidBody || !isForcedSleeping )
-            {
-                return;
-            }
-            if ( isForcedSleeping && rigidbody != null )
-            {
-                rigidbody.Sleep();
-            }
-        }
-
-
-        float TimerMax = 0.1f;
-        float TimerNow = 0f;
-
-
-        private void Update()
-        {
-            if ( isForcedSleeping )
-            {
-                TimerNow += Time.deltaTime;
-                if ( TimerNow > TimerMax )
-                {
-                    if ( rigidbody != null && !rigidbody.IsSleeping() )
-                    {
-                        rigidbody.Sleep();
-                    }
-                    TimerNow = 0f;
-                }
-            }
-        }
-        */
     }
 }

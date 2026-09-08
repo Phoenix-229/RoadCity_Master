@@ -117,6 +117,85 @@ namespace RoadCityMaster.City
             return true;
         }
 
+        /// <summary> Which kind a generated name declares. <see cref="NameFor"/> writes the kind's own name in front of
+        /// the bracket, so the kind whose name prefixes it IS the kind -- asked of the enum rather than by cutting the
+        /// string up a second way, which is the version that would still compile after a member was renamed and would
+        /// silently stop matching. False for any name this class did not write. </summary>
+        public static bool TryParseKind(string name, out GeneratedKind kind)
+        {
+            kind = GeneratedKind.Road;
+            if (string.IsNullOrEmpty(name)) { return false; }
+            System.Array kinds = System.Enum.GetValues(typeof(GeneratedKind));
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                GeneratedKind candidate = (GeneratedKind)kinds.GetValue(i);
+                if (!name.StartsWith(candidate.ToString() + "[", System.StringComparison.Ordinal)) { continue; }
+                kind = candidate;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary> How a block's or a lot's id is spelled inside a generated name, and read back out of one.
+        ///
+        /// The id in "Building[lot.88]#0003" is a string because <see cref="NameFor"/> takes a string: a furniture item's
+        /// source element is a CONTENT CATEGORY, not a numbered record, so the argument cannot be an int. That leaves the
+        /// two numbered cases needing a spelling, and a spelling that is written in one file and read in another is the
+        /// kind that drifts -- so both directions live here, beside the name they go into. C-11's inspector is the reader:
+        /// it turns "lot.88" back into the <see cref="CitySelection"/> that <see cref="CityEditOps.MarkOverridden"/>
+        /// takes, which is the whole bridge between an object an author clicked on and the record the bake honours. </summary>
+        public const string BlockElementPrefix = "block.";
+
+        /// <summary> The lot spelling. See <see cref="BlockElementPrefix"/>. </summary>
+        public const string LotElementPrefix = "lot.";
+
+        /// <summary> The source element id for a block, for <see cref="NameFor"/>. </summary>
+        public static string ElementIdForBlock(int blockId)
+        {
+            return BlockElementPrefix + blockId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary> The source element id for a lot, for <see cref="NameFor"/>. </summary>
+        public static string ElementIdForLot(int lotId)
+        {
+            return LotElementPrefix + lotId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary> Read a numbered source element id back into the element it names. False for an id that names no
+        /// numbered record -- a content category, or an id whose digits are not digits -- which is not a fault: it is how
+        /// a furniture item is told apart from a building, and the caller says so rather than offering an edit that has
+        /// nothing to edit. </summary>
+        public static bool TryParseElementId(string sourceElementId, out CityElementKind kind, out int id)
+        {
+            kind = CityElementKind.None;
+            id = 0;
+            if (string.IsNullOrEmpty(sourceElementId)) { return false; }
+
+            string digits;
+            if (sourceElementId.StartsWith(BlockElementPrefix, System.StringComparison.Ordinal))
+            {
+                kind = CityElementKind.Block;
+                digits = sourceElementId.Substring(BlockElementPrefix.Length);
+            }
+            else if (sourceElementId.StartsWith(LotElementPrefix, System.StringComparison.Ordinal))
+            {
+                kind = CityElementKind.Lot;
+                digits = sourceElementId.Substring(LotElementPrefix.Length);
+            }
+            else
+            {
+                return false;
+            }
+
+            if (!int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out id))
+            {
+                kind = CityElementKind.None;
+                id = 0;
+                return false;
+            }
+            return true;
+        }
+
         /// <summary> Find a branch under the city root, creating it only if it is absent. Reuses the existing child, so
         /// a rebuild never puts a second "Streetscape" beside the first. Never deletes anything. </summary>
         public static Transform EnsureBranch(Transform cityRoot, CityBranch branch)

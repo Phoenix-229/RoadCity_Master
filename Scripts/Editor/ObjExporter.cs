@@ -239,10 +239,17 @@ namespace RoadCityMaster
 
         // RM-108 removed the four-row "Export" submenu from Window/Road City Master. All three exporters act on
         // Selection, so they were menu rows that did nothing without a selection and could not say what they would act
-        // on until pressed; the RoadSystem inspector draws them next to a live count of what is selected instead. The
-        // methods widen from private to internal for that: internal and not public because they are UI commands of this
-        // tool's editor assembly, not an export API another package should bind to -- that would make the OBJ writers
-        // below a supported contract, and they are one contributor's wiki code kept as-is.
+        // on until pressed. The methods widen from private to internal for that: internal and not public because they
+        // are UI commands of this tool's editor assembly, not an export API another package should bind to -- that
+        // would make the OBJ writers below a supported contract, and they are one contributor's wiki code kept as-is.
+        //
+        // B-22 corrected the tense. This comment said the RoadSystem inspector "draws them next to a live count of
+        // what is selected", which was the plan and not the file: RM-108 deleted the four rows and nothing drew the
+        // three commands, so all three exporters sat with no caller and OBJ export was unreachable from the editor.
+        // The inspector's "Export" section draws them now, with that count -- taken with this same
+        // Selection.GetTransforms call and the same two flags, so the figure and the command cannot disagree about
+        // what they are looking at -- and the buttons are disabled while the count of meshes is zero, which is the
+        // dialog below turned into something an author can see before pressing.
         internal static void ExportSelectionToSeparate()
         {
             if (!CreateTargetFolder())
@@ -389,8 +396,13 @@ namespace RoadCityMaster
 
 
         /// <summary> The credit link. RM-108 took its [MenuItem] away with the rest of the Export submenu but did NOT
-        /// take the credit away: the RoadSystem inspector draws this as the author line under its export buttons, which
-        /// puts the attribution beside the thing it is attribution for rather than in a menu an author opens once. </summary>
+        /// take the credit away -- and B-22 is the task that made that true rather than merely stated. Between the two,
+        /// this method had no caller: the credit was owed, described as drawn, and drawn nowhere. The RoadSystem
+        /// inspector's "Export" section now carries the author line under its three export buttons with this method
+        /// behind it, which puts the attribution beside the thing it is attribution for rather than in a menu an author
+        /// opens once. The licence position for this file is THIRD-PARTY-NOTICES.md's; this is the source credit.
+        /// </summary>
+
         internal static void OpenLink()
         {
             // RM-102. The attribution stays -- this exporter is that author's work and the credit is owed. The

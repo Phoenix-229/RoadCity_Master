@@ -15,8 +15,9 @@ namespace RoadCityMaster.City.Editor
     /// with an existing furniture item is NUDGED clear by the minimum separation in a fixed, reproducible order;
     /// that a pole with no clear offset inside the maximum nudge is DROPPED, not overlapped; that no pole in a
     /// result is closer than the minimum separation to any furniture (the invariant the whole task exists for);
-    /// that the same inputs give the same stations twice (C-06); and that the cable is the stated straight-line
-    /// simplification, not a catenary. The actual EdgeObjectMaker prefab placement is the deferred scene half.
+    /// that the same inputs give the same stations twice (C-06); and -- B-27, replacing the case that asserted a
+    /// straight cable -- that the span hangs as a catenary at the sag its conductor tension gives and is judged
+    /// against the NESC road clearance. The actual EdgeObjectMaker prefab placement is the deferred scene half.
     /// Report lines are prefixed RCMPOLE. </summary>
     public static class CityDistributionPoleGate
     {
@@ -50,7 +51,7 @@ namespace RoadCityMaster.City.Editor
             CaseDropWhenBoxedIn(builder, failures);
             CaseSeparationInvariant(builder, failures);
             CaseReproducible(builder, failures);
-            CaseStraightCable(builder, failures);
+            CaseCatenaryCable(builder, failures);
 
             foreach (string failure in failures)
             {
@@ -163,15 +164,73 @@ namespace RoadCityMaster.City.Editor
                    .Append("identical inputs -> identical stations\n");
         }
 
-        /// <summary> The cable is the stated straight-line simplification: linear interpolation, not a catenary. </summary>
-        private static void CaseStraightCable(StringBuilder builder, List<string> failures)
+        /// <summary> The cable hangs. B-27 deleted <c>StraightCableHeightAt</c>, so this case had to change from
+        /// asserting a straight line to asserting a curve, and it asserts the properties that tell one from the
+        /// other rather than a sag figure it could have been fitted to:
+        ///
+        ///   * the midpoint of a level span is BELOW the attachment height, and by w.L^2/(8H) computed from the
+        ///     conductor's own weight and its everyday tension -- so the assertion proves the solver was handed
+        ///     the real stringing figures rather than a sag ratio chosen to look right;
+        ///   * both ends still sit exactly on their attachments, which is the one thing the straight line also
+        ///     got right and a wrong catenary constant would break;
+        ///   * an unlevel span is still below the chord at mid-span, because a sagging wire between poles of
+        ///     different heights is the case a linear interpolation looked most nearly correct in;
+        ///   * the NESC road clearance is the figure the span is judged against, and a span strung too low is
+        ///     refused with the shortfall rather than accepted.
+        /// </summary>
+        private static void CaseCatenaryCable(StringBuilder builder, List<string> failures)
         {
-            Expect(Mathf.Abs(DistributionPoleRun.StraightCableHeightAt(10f, 20f, 0.5f) - 15f) < 1e-4f,
-                "cable: the straight cable midpoint was not the average of the two heights", failures);
-            Expect(Mathf.Abs(DistributionPoleRun.StraightCableHeightAt(10f, 20f, 0f) - 10f) < 1e-4f,
-                "cable: the straight cable at t=0 was not the first pole height", failures);
-            builder.Append("RCMPOLE ").Append("straight-cable".PadRight(20))
-                   .Append("cable is a straight segment (honest simplification)\n");
+            DistributionPoleClass cls = DistributionPoleClass.Default();
+            const double span = 40.0;
+            const double attach = 9.0;
+
+            double sagRatio = cls.SagRatioAt(span);
+            double expectedSag = (cls.conductorUnitWeightNewtonsPerMetre * span * span)
+                / (8.0 * cls.EverydayTensionNewtons());
+            Expect(System.Math.Abs(sagRatio * span - expectedSag) < 1e-9,
+                "cable: the sag ratio did not agree with w.L^2/(8H) over the span", failures);
+
+            double mid = DistributionPoleRun.CableAt(span, attach, attach, cls, 0.5);
+            Expect(mid < attach,
+                "cable: the midpoint of a level span was not below the attachment height", failures);
+            Expect(System.Math.Abs((attach - mid) - expectedSag) < 1e-6,
+                "cable: the solved sag did not match w.L^2/(8H) from the conductor's tension", failures);
+
+            Expect(System.Math.Abs(DistributionPoleRun.CableAt(span, attach, attach, cls, 0.0) - attach) < 1e-6,
+                "cable: the wire did not start at its first attachment", failures);
+            Expect(System.Math.Abs(DistributionPoleRun.CableAt(span, attach, attach, cls, 1.0) - attach) < 1e-6,
+                "cable: the wire did not end at its second attachment", failures);
+
+            double unlevelMid = DistributionPoleRun.CableAt(span, 9.0, 12.0, cls, 0.5);
+            Expect(unlevelMid < 10.5,
+                "cable: an unlevel span was not below its own chord at mid-span", failures);
+
+            List<double> flatGround = new List<double>();
+            for (int i = 0; i < 9; i++) { flatGround.Add(0.0); }
+
+            TransmissionLine.ClearanceResult high = DistributionPoleRun.SpanClearance(
+                span, attach, attach, cls, flatGround, true);
+            Expect(high.clears,
+                "cable: a span attached at 9 m over level ground failed the 5.6 m road clearance", failures);
+
+            TransmissionLine.ClearanceResult low = DistributionPoleRun.SpanClearance(
+                span, 5.0, 5.0, cls, flatGround, true);
+            Expect(!low.clears,
+                "cable: a span attached at 5 m was not refused against the NESC 5.6 m road clearance", failures);
+            Expect(low.worstStationIndex >= 0,
+                "cable: a refused span did not name the station its clearance was worst at", failures);
+
+            TransmissionLine.ClearanceResult secondary = DistributionPoleRun.SpanClearance(
+                span, 5.0, 5.0, cls, flatGround, false);
+            Expect(secondary.clears,
+                "cable: the 0-750 V column did not admit a span the road column refused", failures);
+
+            builder.Append("RCMPOLE ").Append("catenary-cable".PadRight(20))
+                   .Append("one catenary: sag ")
+                   .Append(expectedSag.ToString("F3", System.Globalization.CultureInfo.InvariantCulture))
+                   .Append(" m over ")
+                   .Append(span.ToString("F0", System.Globalization.CultureInfo.InvariantCulture))
+                   .Append(" m, NESC 232-1 clearance enforced\n");
         }
 
         /// <summary> Records a failure when a condition the case demands does not hold. </summary>

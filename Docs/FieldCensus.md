@@ -45,7 +45,7 @@ them, and the order the field appears in the `.unity`/`.prefab` YAML — which i
 |---|---|
 | **Field** | The exact serialised identifier. This is the load-bearing string — the migration contract is about this column. |
 | **Type** | The declared C# type, verbatim. |
-| **Unit** | The real-world unit the value carries (C-15). `m` metres, `°` degrees, `m/s`→`km/h` speed, `%` gradient, `×` unitless ratio/multiplier, `frac` 0–1 fraction, `idx` enum/index, `ref` object reference, `—` structural/no unit. **AUTHORED** where the unit is inferred from field name + usage rather than a written annotation in the source (the source annotates almost none). |
+| **Unit** | The real-world unit the value carries (C-15). `m` metres, `°` degrees, `m/s`→`km/h` speed, `%` gradient, `×` unitless ratio/multiplier, `frac` 0–1 fraction, `m²` area, `/km` count per kilometre, `idx` enum/index, `ref` object reference, `—` structural/no unit. **AUTHORED** where the unit is inferred from field name + usage rather than a written annotation in the source (the source annotates almost none). |
 | **Range** | The valid range. A `[Range]` attribute is quoted as *attr*; a physically/standards-bounded range is given with its basis and marked **AUTHORED**; `—` where genuinely unbounded. |
 | **Shown** | Whether an author sees it today. `Y` default-drawn (public/`[SerializeField]`, not hidden); `hidden` `[HideInInspector]`; `cache` serialised internal state not meant for authoring; `verify` drawn only if the custom editor emits it (confirmed against the editor file in RM-51). |
 
@@ -90,6 +90,7 @@ state, not author input — hidden, with reasons in the judgement list.
 | editorTitleString | string | — | — | runtime |
 | spline | SplineC | ref | — | cache — carrier, auto-wired at creation |
 | MostRecentNodeCount | int | count | ≥ -1 | cache — change-detection |
+| lastBuildUtcTicks | long | UTC ticks | ≥ 0; 0 means never built | cache — build stamp, written only by `ConstructionCleanup` (the one point every completing build reaches and no cancelled one does), read by the measurements foldout through `LastBuildLocalText()`. Not editable: it is an output of a build |
 | splineObject | GameObject | ref | — | cache — carrier host |
 | roadSystem | RoadSystem | ref | — | cache — parent, auto-wired |
 | PiggyBacks | SplineC[] | ref | — | cache — attached secondary splines |
@@ -107,12 +108,14 @@ these as tooltips and inline limits.
 |---|---|---|---|---|
 | laneWidth | float | m | 2.5–5.0 m — **AUTHORED**, lane-width envelope (highway lane 2.7–3.75 m per AASHTO; upper bound widened for shared/rural lanes). This is the bound the inspector actually enforces — `InspectorFieldRegistry` is the machine-readable form of this row | Y |
 | isShouldersEnabled | bool | — | — | Y |
-| shoulderWidth | float | m | 0.0–4.0 m — **AUTHORED**, verge/hard-shoulder range (0 means no shoulder at all; 0.6–3.0 m typical per AASHTO, upper bound raised for wide verges) | Y |
+| shoulderWidth | float | m | 0.0–4.0 m — **AUTHORED** authoring bound (0 means no shoulder at all; widened past the table for verges). The cited figures are per class in `City.RoadClassDefaults` and form TWO tiers with nothing in between: a 0.6–1.2 m edge strip (AASHTO rural collector/local 0.6–2.4 m; shoulders normally omitted on a curbed urban street) and a 3.0 m stopped-vehicle refuge (AASHTO minimum usable shoulder — the 2.44 m design vehicle plus a margin each side). RM-110/B-10 removed the half-widths (1.5, 2.0, 2.5 m): under ~3 m a stopped vehicle still overhangs the lane, and near half the lane width the strip is driven as a lane. Leaving the cited band is reported by the class-change override report, not clamped | Y |
+| shoulderCrossSlope | float | fraction | 0.02–0.06 — **CITED**, AASHTO's shoulder cross-slope band, 0.04 the normal figure for a paved bituminous shoulder. The band is not written into the registry row: it reads `CarriagewaySection.ShoulderCrossSlopeMinimum/Maximum/Source`, the same constants `ShoulderFallMetres(width, crossSlope)` clamps to, so the range the inspector shows and the range the geometry enforces cannot differ. 0 or negative means the normal figure, not a flat shoulder, so a road serialised before RM-110 builds unchanged | Y |
 | lanesForward | int | lanes | ≥1 — **AUTHORED**, a carriageway has at least one lane. Was `laneAmount` (directionless); RM-89 kept the serialised data via `FormerlySerializedAs`, so an old road's TOTAL arrives here and is split once on load | Y |
 | lanesBackward | int | lanes | ≥−1 — **AUTHORED**, 0 on a one-way; −1 is the sentinel meaning "not yet split" and is replaced on load. **0 on a two-way is refused by a cross-field rule, not by this range** | Y |
 | isOneWay | bool | — | — . Decides whether `lanesBackward = 0` is correct or an error | Y |
 | roadClass | RoadClassEnum | idx | one of 13 declared design classes; each carries its own lane count, lane width, design speed and max grade with sources in `RoadClassDefaults` | Y |
 | appliedRoadClass | RoadClassEnum | idx | same 13 — records which class's defaults were last written, so a later class change refreshes only fields left at the outgoing default | **N** (`HideInInspector`; author-editable would corrupt the merge) |
+| settlementRole | SettlementRoleEnum | idx | none, main highway, intercities, intercities connecting towns, intercities connecting villages — **AUTHORED**, the orders of place a hand-drawn network connects. A THIRD axis, deliberately not merged with either of the others: `roadClass` above is the cross-section, `City.RoadClass` is the functional class of a street inside a settlement, and this is what the road is BETWEEN settlements. Read only by the siting pass, which is why `None` leaves a road built exactly as before | Y (picked from a list, never typed) |
 | centerDivider | CenterDividerTypeEnum | idx | none, concrete barrier, barrier with glare screens, wire rope, painted markers. Only the physical types make `medianWidth` occupy section width | Y |
 | medianWidth | float | m | 0–30 m — **AUTHORED** ceiling; 0 is no physical median, rural depressed medians reach ~30 m. What a median of a given width can HOLD is owned by `MedianContent`'s cited band table (painted flush below 1.2 m, kerbed island from 1.2 m, barrier from 2.4 m, trough from 9 m, trough-and-planting from 15 m), not by this range | Y |
 | speedLimitKPH | float | km/h | 5–140 — **AUTHORED** bounds spanning real posted limits (shared space to the fastest posted motorway). Doubles as the DESIGN speed every taper length is computed from; ≤0 falls back to the class default. **A value above the class's own design speed plus one 20 km/h increment is refused by a cross-field rule** | Y |
@@ -135,6 +138,9 @@ these as tooltips and inline limits.
 | matchTerrainSubtraction | float | m | 0–2 m — **AUTHORED**, vertical seat offset the carriageway sinks into matched terrain | Y |
 | isRaisingRoad | bool | — | — | Y |
 | matchHeightsDistance | float | m | 0–200 m — **AUTHORED**, height-blend half-width (source comment: "width of height modification in meters") | Y |
+| terrainFootprint.shoulderMetres | float | m | 0–3 m — **AUTHORED**, flat verge held beyond the outer edge of the built cross-section before the side slope breaks; graded shoulder exceeds usable shoulder and AASHTO's Roadside Design Guide rounds the break of slope, 0.6 m being ordinary berm practice; default 0.5 m. Nested in `City.TerrainFootprintClass`, registered by its dotted path. NOT `shoulderWidth`, which is emitted mesh | Y |
+| batterRunPerRise | float | ×(run:rise) | 1–6 — **AUTHORED**, 1:1 rock cut to 6:1 recoverable embankment; AASHTO Roadside Design Guide recoverable ≤4:1, traversable to 3:1, critical steeper; `City.CutSlopeClass` carries 1.5:1 | Y |
+| batterMaxReachMetres | float | m | 0–60 m — **AUTHORED** ceiling each side, the same bound the splat paint half-width carries; capped again at run time by half of `matchHeightsDistance`, which is what sizes the terraform write buffers | Y |
 | clearDetailsDistance | float | m | 0–100 m — **AUTHORED**, detail-clear half-width | Y |
 | clearDetailsDistanceHeight | float | m | 0–50 m — **AUTHORED**, vertical band for detail clear | Y |
 | clearTreesDistance | float | m | 0–100 m — **AUTHORED**, tree-clear half-width | Y |
@@ -595,6 +601,105 @@ split is a decision, not an oversight (RM-66):
 No serialised field is proposed for deletion. Everything unshown is classified `cache` (kept hidden, reason
 above) or `surface` (drawn in RM-51) — satisfying RM-66's dead-code-is-wired-not-deleted rule.
 
+## The city layer (Module 6)
+
+The `City/Runtime` types are Module-6 code with no shipped pre-overhaul inspector to protect, so they are
+censused as they gain one (the scope note above). C-10 gave them one; this section is that census.
+
+Two different kinds of thing are censused here:
+
+* **`CityAuthoring`** is an ordinary MonoBehaviour, so its rows read exactly like the road tables above.
+* **Node parameters** are not fields on a component at all. A city graph node carries a bag of named
+  parameters declared by `CityNodeCatalog`, so the **Field** column is the parameter name as the catalogue
+  writes it and the runner reads it, and a **Node** column carries the node kind those parameters belong to
+  — which is also the key `InspectorFieldRegistry` files them under. One table with a Node column, rather
+  than twenty tables of two rows each. Their **Shown** standing is `Y` throughout: a node parameter is typed
+  by an author or it does nothing.
+
+Where **Range** reads `—` the value genuinely has no limit, and that is a decision rather than an omission:
+C-15's rule is to record no range instead of inventing one an author would then have to fight. Many city
+parameters treat **zero as "say nothing here"** — the operator uses the figure its own class or archetype
+carries — so their floor is 0 rather than the smallest useful value.
+
+### `CityAuthoring` (the per-settlement component)
+
+| Field | Type | Unit | Range | Shown |
+|---|---|---|---|---|
+| `graph` | `CityGraph` | `ref` | — | Y |
+| `seed` | `int` | `—` | — | Y |
+| `regionCentre` | `Transform` | `ref` | — | Y |
+| `regionXZ` | `Rect` | `m` | — (floor enforced on the Scene handles: 10 m, **AUTHORED**) | Y |
+| `prefabLibraries` | `List<CategoryContentSet>` | `ref` | — | Y |
+| `archetypeOverride` | `SettlementArchetype` | `idx` | — | Y |
+| `scanRoots` | `List<Transform>` | `ref` | — | Y |
+| `cityData` | `CityData` | `ref` | — | Y |
+| `sourceRoad` | `Road` | `ref` | — | Y |
+| `sourceEnd` | `RoadEnd` | `idx` | — | Y |
+
+### City graph node parameters (`CityNodeCatalog`)
+
+| Node | Field | Type | Unit | Range | Shown |
+|---|---|---|---|---|---|
+| `WaterSurface` | `hasWater` | flag | `—` | — | Y |
+| `WaterSurface` | `waterSurfaceY` | number | `m` | — (a world height; a valley lake sits below zero) | Y |
+| `RoadClassSource` | `classId` | number | `idx` | ≥ 0 (`RoadClassCatalog`: Arterial 0, Collector 1, Local 2) | Y |
+| `ZoneCatalogueSource` | `zoneId` | text | `ref` | — | Y |
+| `SuitabilityRaster` | `metresPerCell` | number | `m` | 1–64 (**AUTHORED**, around the 16 m shipped) | Y |
+| `SuitabilityRaster` | `slopeWeight` | number | `frac` | 0–1 (the five weights ship summing to 1.0; 0.45) | Y |
+| `SuitabilityRaster` | `earthworkWeight` | number | `frac` | 0–1 (ships 0.25) | Y |
+| `SuitabilityRaster` | `waterWeight` | number | `frac` | 0–1 (ships 0.15) | Y |
+| `SuitabilityRaster` | `landUseWeight` | number | `frac` | 0–1 (ships 0.10) | Y |
+| `SuitabilityRaster` | `networkWeight` | number | `frac` | 0–1 (ships 0.05) | Y |
+| `CorridorSolve` | `toleranceFraction` | number | `frac` | 0–1 (`CorridorSolver.DefaultToleranceFraction` 0.05) | Y |
+| `BlockInset` | `fallbackInsetMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 defers to the operator) | Y |
+| `LotSubdivision` | `targetAreaM2` | number | `m²` | ≥ 0 (**AUTHORED**, 0 defers to the archetype) | Y |
+| `LotSubdivision` | `splitJitter` | number | `frac` | 0–1 (**AUTHORED**, a share of the split's own spacing) | Y |
+| `BuildableLand` | `sampleSpacingMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 defers to the operator) | Y |
+| `ZonePaint` | `straddleTieFraction` | number | `frac` | 0–1 (**AUTHORED**, a share of one lot's area) | Y |
+| `PrefabValidate` | `category` | text | `ref` | — | Y |
+| `PrefabValidate` | `requester` | text | `—` | — | Y |
+| `PolesAndSpans` | `runLengthMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 takes the street's own length) | Y |
+| `Rail` | `designSpeedKmh` | number | `km/h` | ≥ 0 (**AUTHORED**, 0 defers to the track class) | Y |
+| `Ropeway` | `runLengthMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 measures between the stations) | Y |
+| `Ropeway` | `spanLengthMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 defers to the class) | Y |
+| `FootprintPublish` | `metresPerPixel` | number | `m` | 0.5–16 (**AUTHORED**, around the 4 m shipped) | Y |
+| `FootprintPublish` | `featherWidthMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 is a hard edge; 8 m shipped) | Y |
+| `FootprintConformNode` | `cellAreaM2` | number | `m²` | ≥ 0 (**AUTHORED**, 0 reads the terrain's own cell) | Y |
+| `ChunkGrid` | `chunkSizeMetres` | number | `m` | ≥ 1 (`CityChunkGrid` substitutes 1 m for a non-positive size) | Y |
+| `SpawnTable` | `chunkSizeMetres` | number | `m` | ≥ 1 (same floor; must match the grid) | Y |
+| `OverrideMarker` | `element` | text | `—` | — | Y |
+| `OverrideMarker` | `id` | number | `idx` | ≥ 0 (**AUTHORED**, ids are handed out from zero) | Y |
+| `OverrideMarker` | `note` | text | `—` | — | Y |
+| `CommentGroup` | `title` | text | `—` | — | Y |
+| `CommentGroup` | `body` | text | `—` | — | Y |
+| `ElementPlacement` | `category` | text | `ref` | — | Y |
+
+`ElementPlacement` carries three further parameters **per settlement order**, named by
+`CityNodeCatalog.OrderParameterPrefix` — so the twelve rows below are one shape repeated four times, and the
+registry generates them through that same method rather than typing the prefixes again.
+
+| Node | Field | Type | Unit | Range | Shown |
+|---|---|---|---|---|---|
+| `ElementPlacement` | `capital.present` | flag | `—` | — | Y |
+| `ElementPlacement` | `capital.perKilometreOfFrontage` | number | `/km` | ≥ 0 (**AUTHORED**, 0 places none) | Y |
+| `ElementPlacement` | `capital.minSpacingMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 enforces no minimum) | Y |
+| `ElementPlacement` | `city.present` | flag | `—` | — | Y |
+| `ElementPlacement` | `city.perKilometreOfFrontage` | number | `/km` | ≥ 0 (**AUTHORED**, 0 places none) | Y |
+| `ElementPlacement` | `city.minSpacingMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 enforces no minimum) | Y |
+| `ElementPlacement` | `town.present` | flag | `—` | — | Y |
+| `ElementPlacement` | `town.perKilometreOfFrontage` | number | `/km` | ≥ 0 (**AUTHORED**, 0 places none) | Y |
+| `ElementPlacement` | `town.minSpacingMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 enforces no minimum) | Y |
+| `ElementPlacement` | `village.present` | flag | `—` | — | Y |
+| `ElementPlacement` | `village.perKilometreOfFrontage` | number | `/km` | ≥ 0 (**AUTHORED**, 0 places none) | Y |
+| `ElementPlacement` | `village.minSpacingMetres` | number | `m` | ≥ 0 (**AUTHORED**, 0 enforces no minimum) | Y |
+
+Fifty-five rows in total — ten on `CityAuthoring` and forty-five node parameters — which is every parameter
+the catalogue declares. C-12's gate asserts that equality both ways round, so a parameter added to the
+catalogue without a row here, or a row here naming a parameter no node has, is a failure rather than a
+silence.
+
+
+
 ## Sign-off
 
 This census names every `[SerializeField]` and public serialised field on the runtime components the
@@ -602,6 +707,11 @@ inspectors expose — RoadSystem (4), Road (103), SplineC (32), SplineN (60), Sp
 RoadIntersection (110), SplinatedMeshMaker (101 + nested 82), EdgeObjectMaker (47 + nested 36),
 RoadTerrain (12) — with type, real-world unit, valid range (**AUTHORED** where a standard was adopted per
 C-15), and shown/hidden status. It is the data-side half of the non-breaking contract's gate.
+
+The city layer is censused on the same terms above: CityAuthoring (10) and the 45 node parameters the city
+graph catalogue declares. Those 55 rows are not a migration contract — Module 6 has no shipped inspector to
+protect — but they are the same table the drawers and the gate read, which is why they live in one document
+rather than two.
 
 **Deferred to end-of-topic (part 4):** the before/after scene diff — saving a scene with the current
 inspectors, running RM-51's rebuilt inspectors over it, and confirming no serialised value changed and no

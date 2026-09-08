@@ -62,6 +62,16 @@ namespace RoadCityMaster
 
             //Lift the node clear of the ground under it. RM-94: this compared against absolute world Y and clamped to
             //0.03 m, so a node placed in a valley or below sea level was teleported to 3 cm above the scene origin.
+            //B-13: and refuse outright where there is no ground to lift it clear OF. The node object is destroyed the
+            //same way the double-click guard above destroys it, so a refusal leaves nothing behind in the Hierarchy.
+            //A special end node is exempt: its location is a connection point taken from another road's node, which is
+            //already on terrain, and refusing it would break road-to-road connections instead of empty-air placement.
+            if (!_isSpecialEndNode && !RoadNodeGround.IsOverTerrain(nodeObj.transform.position))
+            {
+                Debug.LogWarning(RoadNodeGround.NoTerrainMessage(nodeObj.transform.position));
+                Object.DestroyImmediate(nodeObj);
+                return null;
+            }
             nodeObj.transform.position = RoadNodeGround.Lift(nodeObj.transform.position);
 
             nodeObj.transform.parent = _road.splineObject.transform;
@@ -141,6 +151,16 @@ namespace RoadCityMaster
             }
             //Lift the node clear of the ground under it. RM-94: this compared against absolute world Y and clamped to
             //0.03 m, so a node placed in a valley or below sea level was teleported to 3 cm above the scene origin.
+            //B-13: and refuse where there is no ground under it at all -- same refusal, same sentence, same cleanup as
+            //CreateNode, and the same exemption: a special end node's location is derived from a node that is already
+            //on terrain, and both intersection creation and SplineC's road connection dereference what they get back,
+            //so refusing there would trade a node in mid-air for a null reference.
+            if (!_isSpecialEndNode && !RoadNodeGround.IsOverTerrain(nodeObj.transform.position))
+            {
+                Debug.LogWarning(RoadNodeGround.NoTerrainMessage(nodeObj.transform.position));
+                Object.DestroyImmediate(nodeObj);
+                return null;
+            }
             nodeObj.transform.position = RoadNodeGround.Lift(nodeObj.transform.position);
             nodeObj.transform.parent = _road.splineObject.transform;
 

@@ -13,13 +13,13 @@ using UnityEngine;
 namespace RoadCityMaster.City.Editor
 {
     /// <summary> RM-88's headless proof of the road-class taxonomy: the pure lookup in <see cref="RoadClassDefaults"/>
-    /// returns a COMPLETE default set for EVERY <see cref="Road.RoadClassEnum"/> value (total), each of the four
-    /// headline numbers (lane width, lane count, design speed, max grade) traces to a named reference or an AUTHORED
-    /// note (nothing unknown, C-15), the lookup is byte-identical on repeat (C-06), selecting a class preserves a
-    /// value the author explicitly overrode (the pure merge), and the upgrade is non-breaking: the new `roadClass`
-    /// field is ADDED beside the lane fields rather than substituted for them, an old road's authored lane count
-    /// still reaches the road through RM-89's migration attribute, and the default class is the 2-lane road the tool
-    /// ships today. </summary>
+    /// returns a COMPLETE default set for EVERY <see cref="Road.RoadClassEnum"/> value (total), each of the five
+    /// headline numbers (lane width, lane count, shoulder width, design speed, max grade) traces to a named reference
+    /// or an AUTHORED note (nothing unknown, C-15), the lookup is byte-identical on repeat (C-06), selecting a class
+    /// preserves a value the author explicitly overrode (the pure merge), and the upgrade is non-breaking: the new
+    /// `roadClass` field is ADDED beside the lane fields rather than substituted for them, an old road's authored lane
+    /// count still reaches the road through RM-89's migration attribute, and the default class is the 2-lane road the
+    /// tool ships today. </summary>
     public static class CityRoadClassGate
     {
         private const string Prefix = "RCMROADCLASS";
@@ -96,9 +96,11 @@ namespace RoadCityMaster.City.Editor
                 + Num(RoadClassDefaults.All().Count) + "  incomplete " + Num(incomplete));
         }
 
-        /// <summary> Traceability (C-15 / § 10.18): every one of the four headline numbers on every class is a
+        /// <summary> Traceability (C-15 / § 10.18): every one of the five headline numbers on every class is a
         /// well-formed audit row — a cited reference for Matches, a note for Authored — so nothing is left unknown and
-        /// no Matches stands without a source. The verdict tally is reported. </summary>
+        /// no Matches stands without a source. The count is never written here: the case walks whatever
+        /// <see cref="RoadClassProfile.Citations"/> yields, so the shoulder column RM-110 added is audited without this
+        /// gate changing. The verdict tally is reported. </summary>
         private static void CaseEveryDefaultTraces(List<string> failures, StringBuilder sb)
         {
             int malformed = 0, matches = 0, authored = 0, other = 0;

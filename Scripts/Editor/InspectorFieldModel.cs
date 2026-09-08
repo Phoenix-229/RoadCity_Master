@@ -27,11 +27,27 @@ namespace RoadCityMaster
         WhatIsGeneratedFromIt// build controls, statistics, reports
     }
 
-    /// <summary> The real-world unit a field is measured in. The label is what appears after the value in the
-    /// inspector; None draws nothing. These match the FieldCensus unit column exactly. </summary>
+    /// <summary> The real-world unit a field is measured in. The label is what appears in the inspector's unit column;
+    /// None draws nothing. The MEMBERS were the census's unit vocabulary exactly -- one enum entry per unit the field
+    /// census records -- but the token drawn for an author is spelled out where the census abbreviates: a census read by
+    /// a maintainer can define `frac` in its legend, and an inspector has no legend for an author to consult.
+    ///
+    /// C-10 added the last two. The census was taken over the ROAD's serialised surface, which measures lengths, angles
+    /// and speeds and never once an area or a rate: the city's node parameters do both -- a lot's target area, and how
+    /// many benches stand per kilometre of frontage -- so the vocabulary grew rather than those two fields shipping
+    /// unitless.
+    ///
+    /// B-27's rail work added the two after those. A railway is measured in MILLIMETRES where a road is measured in
+    /// metres -- cant is 150 mm and cant deficiency 110 mm, and rounding either to the nearest metre erases the
+    /// quantity -- and it states its gradient in PER MILLE rather than per cent, because 15 per mille reads as a
+    /// number while 1.5 % reads as a rounding. Both are the real unit of the figure they carry rather than a
+    /// conversion of a unit already here, which is why they are members and not a "mm" typed into a label.
+    ///
+    /// They are appended, never inserted, because a member's position is what a switch reads. </summary>
     public enum FieldUnit
     {
-        None, Metres, Degrees, KmPerHour, Percent, Fraction, Multiplier, Index, Reference
+        None, Metres, Degrees, KmPerHour, Percent, Fraction, Multiplier, Index, Reference, SquareMetres,
+        PerKilometre, Millimetres, PerMille
     }
 
     /// <summary> A closed or half-open real-world range with the SOURCE of the limit named, so the inline message can
@@ -146,14 +162,31 @@ namespace RoadCityMaster
         public readonly FieldUnit unit;
         public readonly FieldRange range;
 
+        /// <summary> B-5, fault 8. The sentence an author gets on hover: what the value DOES, in the terms of the road
+        /// rather than of the code. Not the same information as the range -- the range says what is allowed and where the
+        /// limit comes from, which the drawer already shows inline when it is broken -- so a tooltip that restates the
+        /// range teaches nothing. Empty on a descriptor built as a test probe; the registry's own rows all carry one, and
+        /// RM-102's gate asserts it. </summary>
+        public readonly string tooltip;
+
         public FieldDescriptor(string component, string field, string label,
             FieldGroup group, FieldUnit unit, FieldRange range)
+            : this(component, field, label, group, unit, range, null)
+        {
+        }
+
+        public FieldDescriptor(string component, string field, string label,
+            FieldGroup group, FieldUnit unit, FieldRange range, string tooltip)
         {
             this.component = component; this.field = field; this.label = label;
             this.group = group; this.unit = unit; this.range = range;
+            this.tooltip = string.IsNullOrEmpty(tooltip) ? "" : tooltip;
         }
 
-        /// <summary> The unit token drawn after the value; empty for None/Reference. Matches the census legend. </summary>
+        /// <summary> The unit token drawn in the inspector's unit column; empty for None/Reference.
+        ///
+        /// B-5, fault 6: "frac" was not a unit an author recognises. It is spelled out now. The census keeps its own
+        /// abbreviation, because a document with a legend can afford one and an inspector row cannot. </summary>
         public string UnitLabel()
         {
             switch (unit)
@@ -162,20 +195,29 @@ namespace RoadCityMaster
                 case FieldUnit.Degrees: return "°";
                 case FieldUnit.KmPerHour: return "km/h";
                 case FieldUnit.Percent: return "%";
-                case FieldUnit.Fraction: return "frac";
+                case FieldUnit.Fraction: return "fraction";
                 case FieldUnit.Multiplier: return "×";
                 case FieldUnit.Index: return "idx";
                 case FieldUnit.Reference: return "ref";
+                case FieldUnit.SquareMetres: return "m²";
+                case FieldUnit.PerKilometre: return "/km";
+                case FieldUnit.Millimetres: return "mm";
+                case FieldUnit.PerMille: return "‰";
                 default: return "";
             }
         }
 
         /// <summary> True when this field carries a measured numeric unit (so RM-51's gate can require a unit label on
-        /// exactly these). Index/Reference/None are non-measured. </summary>
+        /// exactly these). Index/Reference/None are non-measured.
+        ///
+        /// C-10's two city units belong here: an area in m² and a rate per kilometre are both measured quantities an
+        /// author reasons about in the world, unlike an index into a catalogue or a reference to an asset. </summary>
         public bool IsNumericMeasured()
         {
             return unit == FieldUnit.Metres || unit == FieldUnit.Degrees || unit == FieldUnit.KmPerHour
-                || unit == FieldUnit.Percent || unit == FieldUnit.Fraction || unit == FieldUnit.Multiplier;
+                || unit == FieldUnit.Percent || unit == FieldUnit.Fraction || unit == FieldUnit.Multiplier
+                || unit == FieldUnit.SquareMetres || unit == FieldUnit.PerKilometre || unit == FieldUnit.Millimetres
+                || unit == FieldUnit.PerMille;
         }
 
         /// <summary> Validate a value against the range. On failure the message names the offending limit and its

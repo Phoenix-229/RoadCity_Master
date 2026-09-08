@@ -80,10 +80,8 @@ namespace RoadCityMaster
         private const string helpText1 = "Each material added is rendered on top of the previous. Combine with transparent shaders which accept shadows to allow for easy marking.";
 
         //Checkers:
-        private Texture2D loadButtonBG = null;
-        private Texture2D loadButtonBGGlow = null;
-
-        private GUIStyle loadButton = null;
+        // B-11. Gone from here: `loadButton` and the two textures it was built from. The branded command-button style is
+        // `LegacyInspectorShell.CommandButtonStyle()`, which is where three other editors' copies of it went too.
         private bool isInitialized = false;
         #endregion
         #endregion
@@ -186,17 +184,35 @@ namespace RoadCityMaster
             }
 
             EditorUtilities.DrawLine();
+            // B-14. Every control in this inspector sat behind the two unguarded dereferences below. An intersection
+            // whose roads or nodes have been deleted -- which is what deleting a road does to the intersections on it --
+            // made that line throw before a single control was drawn, so the author could not reach the inspector at
+            // all, not even to see what was wrong or to delete the leftover. A control that cannot be drawn reports even
+            // less than one that answers a click with nothing, so the whole panel says what is missing instead.
+            if (intersection.node1 == null || intersection.node2 == null
+                || intersection.node1.spline == null || intersection.node2.spline == null
+                || intersection.node1.spline.road == null || intersection.node2.spline.road == null)
+            {
+                EditorGUILayout.HelpBox("This intersection has lost one of the two road nodes it was made from, so"
+                    + " there is nothing to draw options for. It is left over from a road or node that was deleted, and"
+                    + " deleting this GameObject is safe.", MessageType.Warning);
+                EditorUtilities.DrawLine();
+                return;
+            }
             EditorGUILayout.BeginHorizontal();
             {
-                Road road1 = intersection.node1.spline.transform.parent.GetComponent<Road>();
-                Road road2 = intersection.node2.spline.transform.parent.GetComponent<Road>();
+                // B-14. Was `spline.transform.parent.GetComponent<Road>()` twice. SplineC already holds the road it
+                // belongs to, so this asked the hierarchy for something it was handed -- two GetComponent walks on every
+                // repaint of this inspector, and a third null to trip over if a spline object were ever reparented.
+                Road road1 = intersection.node1.spline.road;
+                Road road2 = intersection.node2.spline.road;
                 EditorGUILayout.LabelField("First road: " + road1.name + " node: " + intersection.node1.name);
                 EditorGUILayout.LabelField("Second road: " + road2.name + " node: " + intersection.node2.name);
             }
             EditorGUILayout.EndHorizontal();
             EditorUtilities.DrawLine();
             EditorGUILayout.LabelField("Intersection options", EditorStyles.boldLabel);
-            if (GUILayout.Button("Update intersection", loadButton))
+            if (GUILayout.Button("Update intersection", LegacyInspectorShell.CommandButtonStyle()))
             {
                 TriggerRoadUpdate(true);
             }
@@ -260,8 +276,29 @@ namespace RoadCityMaster
             EditorUtilities.DrawLine();
 
 
+            // B-16. The junction FORM and the fields the two non-at-grade forms need, drawn through the RM-51 groups
+            // straight from the registry rather than as eight more raw rows -- so each carries its unit, its band and
+            // its hover sentence instead of the flat layout growing eight more exceptions. The legacy popups below are
+            // not registry fields and stay exactly where they were.
+            LegacyInspectorShell.SectionHeader("Junction form",
+                "Whether this junction meets on one surface at all: priority and signalised do and differ only in who"
+                + " waits, a roundabout circulates around an island, and an interchange carries one road over the"
+                + " other and adds ramps beside the crossing rather than replacing it.");
+            LegacyInspectorShell.AllGroups(serializedObject, "RoadIntersection", fields);
+            DrawJunctionVerdict(intersection);
+            EditorUtilities.DrawLine();
+
+
             //Option: Intersection stop type:
             intersectionStopType.enumValueIndex = (int)EditorGUILayout.Popup("Intersection stop type:", (int)intersection.intersectionStopType, iStopTypeEnumDescriptions);
+
+            // B-16. The form decides which of these four values means anything, so the mismatch is said here, beside the
+            // popup that caused it, rather than only inside the resolve.
+            string stopRefusal;
+            if (!intersection.StopTypeIsCompatible(out stopRefusal))
+            {
+                EditorGUILayout.HelpBox(stopRefusal, MessageType.Warning);
+            }
 
 
             if (intersection.intersectionStopType == RoadIntersection.iStopTypeEnum.TrafficLight1 || intersection.intersectionStopType == RoadIntersection.iStopTypeEnum.TrafficLight2)
@@ -389,7 +426,8 @@ namespace RoadCityMaster
 
                     GUILayout.Space(4f);
                     EditorGUILayout.BeginHorizontal();
-                    GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
+                    // B-14. A legend, not a control -- see DoDefaultHelpMat.
+                    GUILayout.Label(refreshButtonTexture, imageButton, GUILayout.Width(16f));
                     EditorGUILayout.LabelField(" = Resets settings to default.");
                     EditorGUILayout.EndHorizontal();
                     EditorGUILayout.EndVertical();
@@ -417,7 +455,8 @@ namespace RoadCityMaster
                     EditorGUILayout.LabelField("Increasing this value will increase the scaling sensitivity relative to the size of the intersection. Higher scaling value = bigger traffic lights at further distances. Default value is 170.");
                     GUILayout.Space(4f);
                     EditorGUILayout.BeginHorizontal();
-                    GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
+                    // B-14. A legend, not a control -- see DoDefaultHelpMat.
+                    GUILayout.Label(refreshButtonTexture, imageButton, GUILayout.Width(16f));
                     EditorGUILayout.LabelField(" = Resets settings to default.");
                     EditorGUILayout.EndHorizontal();
                     EditorGUILayout.EndVertical();
@@ -449,11 +488,27 @@ namespace RoadCityMaster
                 EditorGUILayout.LabelField("Recommended to keep grades and angles small leading up to intersections.");
                 GUILayout.Space(4f);
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
+                // B-14. A legend, not a control -- see DoDefaultHelpMat.
+                GUILayout.Label(refreshButtonTexture, imageButton, GUILayout.Width(16f));
                 EditorGUILayout.LabelField(" = Resets settings to default.");
                 EditorGUILayout.EndHorizontal();
                 EditorGUILayout.EndVertical();
             }
+
+            // B-14. The four "reset this group to the default materials" icons below are recorded here and acted on at
+            // the foot of this inspector, beside the other secondary effects, instead of running under the press.
+            // ResetCenterMaterials and its three siblings write the seventeen live Material fields directly, and this
+            // pass reads those same fields twice after the icons are drawn: the "show Mat #2 only if #1 is set"
+            // cascades count rows from them, and the change detector compares them against the properties. Run under
+            // the press, a reset that nulls Mat #2 and #3 -- which all four of them do -- removed rows from a pass whose
+            // Layout had already counted them ("Getting control N's position in a group with only N controls"), and the
+            // detector then read the fresh defaults against stale properties and could not tell an author's own
+            // assignment from the tool putting its defaults back. Deferred, the fields move once the layout is finished
+            // and ApplyModifiedProperties has run, which is where every other effect in this inspector happens.
+            bool isCenterMaterialsReset = false;
+            bool isExtStretchedMaterialsReset = false;
+            bool isExtTiledMaterialsReset = false;
+            bool isLanesMaterialsReset = false;
 
             //Option: Use default materials:
             EditorUtilities.DrawLine();
@@ -472,7 +527,7 @@ namespace RoadCityMaster
             EditorGUILayout.LabelField("Center marker material(s):");
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.ResetCenterMaterials();
+                isCenterMaterialsReset = true;
             }
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4f);
@@ -496,9 +551,21 @@ namespace RoadCityMaster
 
             EditorGUILayout.BeginHorizontal();
             fields.Property(markerCenter1, new GUIContent("  Mat #1: "));
+            // B-14. This X, and the sixteen like it in the material groups below, wrote `intersection.<field> = null`:
+            // straight onto the live component, past the SerializedObject the row beside it is drawn from. Three things
+            // went wrong at once. The row's own object field kept showing the material for the rest of the frame, since
+            // it reads the property, which still held it. The change detector at the foot of this inspector compares
+            // property against field, so a press that moved only the field could not be seen as a material change and
+            // UpdateMaterials() never ran -- the reference went but the marking stayed on the intersection. And the field
+            // it nulled is the same one the "show Mat #2 only if #1 is set" tests below read, so the press removed rows
+            // in the middle of a pass whose Layout had already counted them, which is what IMGUI reports as "Getting
+            // control N's position in a group with only N controls" on the next repaint. Writing the property instead
+            // answers all three: the row clears, ApplyModifiedProperties carries the null to the field at the end of the
+            // frame where every other value in this inspector lands, the detector sees the difference and lifts the
+            // material off the mesh, and the row count cannot change under a pass that is already drawing.
             if (intersection.markerCenter1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.markerCenter1 = null;
+                markerCenter1.objectReferenceValue = null;
             }
             EditorGUILayout.EndHorizontal();
 
@@ -508,7 +575,7 @@ namespace RoadCityMaster
                 fields.Property(markerCenter2, new GUIContent("  Mat #2: "));
                 if (intersection.markerCenter2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.markerCenter2 = null;
+                    markerCenter2.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -518,7 +585,7 @@ namespace RoadCityMaster
                 fields.Property(markerCenter3, new GUIContent("  Mat #3: "));
                 if (intersection.markerCenter3 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.markerCenter3 = null;
+                    markerCenter3.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -539,7 +606,7 @@ namespace RoadCityMaster
             EditorGUILayout.LabelField("Exterior fitted marker material(s):");
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.ResetExtStrechtedMaterials();
+                isExtStretchedMaterialsReset = true;
             }
             EditorGUILayout.EndHorizontal();
 
@@ -547,7 +614,7 @@ namespace RoadCityMaster
             fields.Property(markerExtStretch1, new GUIContent("  Mat #1: "));
             if (intersection.markerExtStretch1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.markerExtStretch1 = null;
+                markerExtStretch1.objectReferenceValue = null;
             }
             EditorGUILayout.EndHorizontal();
 
@@ -557,7 +624,7 @@ namespace RoadCityMaster
                 fields.Property(markerExtStretch2, new GUIContent("  Mat #2: "));
                 if (intersection.markerExtStretch2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.markerExtStretch2 = null;
+                    markerExtStretch2.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -567,7 +634,7 @@ namespace RoadCityMaster
                 fields.Property(markerExtStretch3, new GUIContent("  Mat #3: "));
                 if (intersection.markerExtStretch3 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.markerExtStretch3 = null;
+                    markerExtStretch3.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -588,7 +655,7 @@ namespace RoadCityMaster
             EditorGUILayout.LabelField("Exterior tiled marker material(s):");
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.ResetExtTiledMaterials();
+                isExtTiledMaterialsReset = true;
             }
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4f);
@@ -597,7 +664,7 @@ namespace RoadCityMaster
             fields.Property(markerExtTiled1, new GUIContent("  Mat #1: "));
             if (intersection.markerExtTiled1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.markerExtTiled1 = null;
+                markerExtTiled1.objectReferenceValue = null;
             }
             EditorGUILayout.EndHorizontal();
 
@@ -607,7 +674,7 @@ namespace RoadCityMaster
                 fields.Property(markerExtTiled2, new GUIContent("  Mat #2: "));
                 if (intersection.markerExtTiled2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.markerExtTiled2 = null;
+                    markerExtTiled2.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -617,7 +684,7 @@ namespace RoadCityMaster
                 fields.Property(markerExtTiled3, new GUIContent("  Mat #3: "));
                 if (intersection.markerExtTiled3 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.markerExtTiled3 = null;
+                    markerExtTiled3.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -638,7 +705,7 @@ namespace RoadCityMaster
             EditorGUILayout.LabelField("Lanes marker materials:");
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.ResetLanesMaterials();
+                isLanesMaterialsReset = true;
             }
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4f);
@@ -647,7 +714,7 @@ namespace RoadCityMaster
             fields.Property(lane0Mat1, new GUIContent("Lane section 0 mat #1:"));
             if (intersection.lane0Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.lane0Mat1 = null;
+                lane0Mat1.objectReferenceValue = null;
             }
             EditorGUILayout.EndHorizontal();
             if (intersection.lane0Mat1 != null)
@@ -656,7 +723,7 @@ namespace RoadCityMaster
                 fields.Property(lane0Mat2, new GUIContent("Lane section 0 mat #2:"));
                 if (intersection.lane0Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.lane0Mat2 = null;
+                    lane0Mat2.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -667,7 +734,7 @@ namespace RoadCityMaster
             fields.Property(lane1Mat1, new GUIContent("Lane section 1 mat #1:"));
             if (intersection.lane1Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                intersection.lane1Mat1 = null;
+                lane1Mat1.objectReferenceValue = null;
             }
             EditorGUILayout.EndHorizontal();
             if (intersection.lane1Mat1 != null)
@@ -676,7 +743,7 @@ namespace RoadCityMaster
                 fields.Property(lane1Mat2, new GUIContent("Lane section 1 mat #2:"));
                 if (intersection.lane1Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.lane1Mat2 = null;
+                    lane1Mat2.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
             }
@@ -688,7 +755,7 @@ namespace RoadCityMaster
                 fields.Property(lane2Mat1, new GUIContent("Lane section 2 mat #1:"));
                 if (intersection.lane2Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.lane2Mat1 = null;
+                    lane2Mat1.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
                 if (intersection.lane2Mat1 != null)
@@ -697,7 +764,7 @@ namespace RoadCityMaster
                     fields.Property(lane2Mat2, new GUIContent("Lane section 2 mat #2:"));
                     if (intersection.lane2Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
-                        intersection.lane2Mat2 = null;
+                        lane2Mat2.objectReferenceValue = null;
                     }
                     EditorGUILayout.EndHorizontal();
                 }
@@ -711,7 +778,7 @@ namespace RoadCityMaster
                 fields.Property(lane3Mat1, new GUIContent("Lane section 3 mat #1:"));
                 if (intersection.lane3Mat1 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
-                    intersection.lane3Mat1 = null;
+                    lane3Mat1.objectReferenceValue = null;
                 }
                 EditorGUILayout.EndHorizontal();
                 if (intersection.lane3Mat1 != null)
@@ -720,7 +787,7 @@ namespace RoadCityMaster
                     fields.Property(lane3Mat2, new GUIContent("Lane section 3 mat #2:"));
                     if (intersection.lane3Mat2 != null && GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f)))
                     {
-                        intersection.lane3Mat2 = null;
+                        lane3Mat2.objectReferenceValue = null;
                     }
                     EditorGUILayout.EndHorizontal();
                 }
@@ -864,6 +931,13 @@ namespace RoadCityMaster
             bool isPointLightsToggled = false;
             bool isGizmoChanged = false;
             bool isMaterialChanged = false;
+            // B-14. Separate from isMaterialChanged, and true only when the "Use default materials:" toggle has just
+            // been ticked ON this frame. It is what drives ResetMaterialsAll() at the foot of this inspector, which used
+            // to run on ANY material change while the toggle merely happened to be set -- and since the toggle ships
+            // set, that meant every material an author dropped into a slot was replaced by the tool's default one frame
+            // later. The toggle's own promise, in its help text, is about the moment it is checked; this flag is that
+            // moment and nothing else.
+            bool isDefaultMaterialsTicked = false;
             bool isRoadUpdate = false;
 
             // B-19. `fields.Changed` belongs in this test and is not belt-and-braces. A deferred control commits on the
@@ -944,144 +1018,58 @@ namespace RoadCityMaster
                 if (isUsingDefaultMaterials.boolValue != intersection.isUsingDefaultMaterials)
                 {
                     isMaterialChanged = true;
+                    // The property holds what the row now shows, the field what the intersection was wearing, so this is
+                    // true for a tick and false for an untick. Unticking resets nothing: it hands the seventeen slots
+                    // below to the author with whatever is in them, which is the only way in to customising them.
+                    isDefaultMaterialsTicked = isUsingDefaultMaterials.boolValue;
                 }
 
-                if (markerCenter1 == null || markerCenter1.objectReferenceValue == null)
-                {
-                    intersection.markerCenter1 = null;
-                }
-                if (markerCenter2 == null || markerCenter2.objectReferenceValue == null)
-                {
-                    intersection.markerCenter2 = null;
-                }
-                if (markerCenter3 == null || markerCenter3.objectReferenceValue == null)
-                {
-                    intersection.markerCenter3 = null;
-                }
-                if (markerExtStretch1 == null || markerExtStretch1.objectReferenceValue == null)
-                {
-                    intersection.markerExtStretch1 = null;
-                }
-                if (markerExtStretch2 == null || markerExtStretch2.objectReferenceValue == null)
-                {
-                    intersection.markerExtStretch2 = null;
-                }
-                if (markerExtStretch3 == null || markerExtStretch3.objectReferenceValue == null)
-                {
-                    intersection.markerExtStretch3 = null;
-                }
-                if (markerExtTiled1 == null || markerExtTiled1.objectReferenceValue == null)
-                {
-                    intersection.markerExtTiled1 = null;
-                }
-                if (markerExtTiled2 == null || markerExtTiled2.objectReferenceValue == null)
-                {
-                    intersection.markerExtTiled2 = null;
-                }
-                if (markerExtTiled3 == null || markerExtTiled3.objectReferenceValue == null)
-                {
-                    intersection.markerExtTiled3 = null;
-                }
-                if (lane0Mat1 == null || lane0Mat1.objectReferenceValue == null)
-                {
-                    intersection.lane0Mat1 = null;
-                }
-                if (lane0Mat2 == null || lane0Mat2.objectReferenceValue == null)
-                {
-                    intersection.lane0Mat2 = null;
-                }
-                if (lane1Mat1 == null || lane1Mat1.objectReferenceValue == null)
-                {
-                    intersection.lane1Mat1 = null;
-                }
-                if (lane1Mat2 == null || lane1Mat2.objectReferenceValue == null)
-                {
-                    intersection.lane1Mat2 = null;
-                }
-                if (lane2Mat1 == null || lane2Mat1.objectReferenceValue == null)
-                {
-                    intersection.lane2Mat1 = null;
-                }
-                if (lane2Mat2 == null || lane2Mat2.objectReferenceValue == null)
-                {
-                    intersection.lane2Mat2 = null;
-                }
-                if (lane3Mat1 == null || lane3Mat1.objectReferenceValue == null)
-                {
-                    intersection.lane3Mat1 = null;
-                }
-                if (lane3Mat2 == null || lane3Mat2.objectReferenceValue == null)
-                {
-                    intersection.lane3Mat2 = null;
-                }
-
-                if (intersection.markerCenter1 != null && markerCenter1.objectReferenceValue != intersection.markerCenter1)
+                // B-14. Two things stood here, seventeen copies each: a block that cleared the live field whenever its
+                // property was null, and the comparison below with a leading `field != null` guard on it. Together they
+                // made two of the three gestures an author can make on these seventeen material slots invisible. The
+                // mirror nulled the field before the comparison read it, so a material being CLEARED could not be seen;
+                // the guard rejected the case where the field was still empty, so a material being ASSIGNED into an
+                // empty slot could not be seen either. Only swapping one material for another ever reached
+                // UpdateMaterials() -- dropping a marking material into an empty slot, the ordinary gesture, changed the
+                // inspector row and nothing on the intersection itself.
+                //
+                // The mirror is gone: ApplyModifiedProperties() thirty lines below writes every property onto its field,
+                // which is the same nulling done once by the one authority for it. And the comparison is stated once and
+                // asked of each slot -- the property holds what the author has just put in the row, the field holds what
+                // the intersection is wearing, so "they differ" IS the material change, with null on either side meaning
+                // cleared or newly assigned. The `||` chain short-circuits, which costs nothing because every operand is
+                // a comparison with no side effect -- unlike a chain of GUILayout.Button calls, where short-circuiting
+                // is the layout bug this same entry fixed in SplineNEditor.
+                if (IsMaterialChanged(markerCenter1, intersection.markerCenter1)
+                    || IsMaterialChanged(markerCenter2, intersection.markerCenter2)
+                    || IsMaterialChanged(markerCenter3, intersection.markerCenter3)
+                    || IsMaterialChanged(markerExtStretch1, intersection.markerExtStretch1)
+                    || IsMaterialChanged(markerExtStretch2, intersection.markerExtStretch2)
+                    || IsMaterialChanged(markerExtStretch3, intersection.markerExtStretch3)
+                    || IsMaterialChanged(markerExtTiled1, intersection.markerExtTiled1)
+                    || IsMaterialChanged(markerExtTiled2, intersection.markerExtTiled2)
+                    || IsMaterialChanged(markerExtTiled3, intersection.markerExtTiled3)
+                    || IsMaterialChanged(lane0Mat1, intersection.lane0Mat1)
+                    || IsMaterialChanged(lane0Mat2, intersection.lane0Mat2)
+                    || IsMaterialChanged(lane1Mat1, intersection.lane1Mat1)
+                    || IsMaterialChanged(lane1Mat2, intersection.lane1Mat2)
+                    || IsMaterialChanged(lane2Mat1, intersection.lane2Mat1)
+                    || IsMaterialChanged(lane2Mat2, intersection.lane2Mat2)
+                    || IsMaterialChanged(lane3Mat1, intersection.lane3Mat1)
+                    || IsMaterialChanged(lane3Mat2, intersection.lane3Mat2))
                 {
                     isMaterialChanged = true;
-                }
-                if (intersection.markerCenter2 != null && markerCenter2.objectReferenceValue != intersection.markerCenter2)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.markerCenter3 != null && markerCenter3.objectReferenceValue != intersection.markerCenter3)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.markerExtStretch1 != null && markerExtStretch1.objectReferenceValue != intersection.markerExtStretch1)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.markerExtStretch2 != null && markerExtStretch2.objectReferenceValue != intersection.markerExtStretch2)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.markerExtStretch3 != null && markerExtStretch3.objectReferenceValue != intersection.markerExtStretch3)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.markerExtTiled1 != null && markerExtTiled1.objectReferenceValue != intersection.markerExtTiled1)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.markerExtTiled2 != null && markerExtTiled2.objectReferenceValue != intersection.markerExtTiled2)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.markerExtTiled3 != null && markerExtTiled3.objectReferenceValue != intersection.markerExtTiled3)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane0Mat1 != null && lane0Mat1.objectReferenceValue != intersection.lane0Mat1)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane0Mat2 != null && lane0Mat2.objectReferenceValue != intersection.lane0Mat2)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane1Mat1 != null && lane1Mat1.objectReferenceValue != intersection.lane1Mat1)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane1Mat2 != null && lane1Mat2.objectReferenceValue != intersection.lane1Mat2)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane2Mat1 != null && lane2Mat1.objectReferenceValue != intersection.lane2Mat1)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane2Mat2 != null && lane2Mat2.objectReferenceValue != intersection.lane2Mat2)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane3Mat1 != null && lane3Mat1.objectReferenceValue != intersection.lane3Mat1)
-                {
-                    isMaterialChanged = true;
-                }
-                if (intersection.lane3Mat2 != null && lane3Mat2.objectReferenceValue != intersection.lane3Mat2)
-                {
-                    isMaterialChanged = true;
+                    // B-14. And the toggle above stops claiming otherwise. An author who puts their own material in one
+                    // of these seventeen slots is not using the tool's defaults any more, so leaving "Use default
+                    // materials:" ticked would leave the inspector stating something untrue about the mesh in front of
+                    // it -- and would arm the reset at the foot of this inspector against the next slot they fill.
+                    // Written to the property, like everything else in these rows, so ApplyModifiedProperties below
+                    // carries it to the field. Not when the toggle itself was the gesture this frame: a tick resets all
+                    // seventeen slots to defaults, so it must be left saying exactly that.
+                    if (!isDefaultMaterialsTicked)
+                    {
+                        isUsingDefaultMaterials.boolValue = false;
+                    }
                 }
 
 
@@ -1111,13 +1099,42 @@ namespace RoadCityMaster
                     intersection.ToggleTrafficLightPoleColor();
                 }
 
-                if (isMaterialChanged)
+                // B-14. The four group resets, run here rather than under the icon that asked for them -- see the flags
+                // where they are declared. Each is told not to update the mesh itself, because the one UpdateMaterials()
+                // below covers all four together, and a reset is a material change like any other.
+                if (isCenterMaterialsReset)
+                {
+                    intersection.ResetCenterMaterials(false);
+                    isMaterialChanged = true;
+                }
+
+                if (isExtStretchedMaterialsReset)
+                {
+                    intersection.ResetExtStrechtedMaterials(false);
+                    isMaterialChanged = true;
+                }
+
+                if (isExtTiledMaterialsReset)
+                {
+                    intersection.ResetExtTiledMaterials(false);
+                    isMaterialChanged = true;
+                }
+
+                if (isLanesMaterialsReset)
+                {
+                    intersection.ResetLanesMaterials(false);
+                    isMaterialChanged = true;
+                }
+
+                // B-14. The tick comes first and on its own: ResetMaterialsAll ends in UpdateMaterials(), so it already
+                // does what the branch below would, and running both would put every material on the mesh twice.
+                if (isDefaultMaterialsTicked)
+                {
+                    intersection.ResetMaterialsAll();
+                }
+                else if (isMaterialChanged)
                 {
                     intersection.UpdateMaterials();
-                    if (intersection.isUsingDefaultMaterials)
-                    {
-                        intersection.ResetMaterialsAll();
-                    }
                 }
 
                 if (isRoadUpdate)
@@ -1127,6 +1144,18 @@ namespace RoadCityMaster
 
                 EditorUtility.SetDirty(intersection);
             }
+        }
+
+
+        /// <summary> True when the material an author has just put in a row differs from the one the intersection is
+        /// wearing now. B-14: the one statement of a comparison that stood written out seventeen times, once per
+        /// material slot, each copy carrying a null guard that hid a slot being filled or emptied. The property is what
+        /// the row shows and the field is what the mesh has, so a difference either way round -- including to or from
+        /// null -- is a material change. The property's own null check is the seventeen copies' protection against a
+        /// FindProperty that missed, kept once. </summary>
+        private static bool IsMaterialChanged(SerializedProperty _property, Material _current)
+        {
+            return _property != null && _property.objectReferenceValue != _current;
         }
 
 
@@ -1155,7 +1184,12 @@ namespace RoadCityMaster
 
             if (Event.current.type == EventType.MouseUp && Event.current.button == 0)
             {
-                if (intersection.transform.position != intersection.node1.transform.position)
+                // B-14. `node1`/`node2` were read here with no check, while the F5 branch below checks both -- so every
+                // left-click release in the Scene view, with a leftover intersection selected, was a
+                // NullReferenceException. TriggerRoadUpdate reports the same loss when the author asks for the update on
+                // purpose; a mouse-up is not asking, so this one is quiet and simply does not drag nodes that are gone.
+                if (intersection.node1 != null && intersection.node2 != null
+                    && intersection.transform.position != intersection.node1.transform.position)
                 {
                     intersection.node1.transform.position = intersection.transform.position;
                     intersection.node2.transform.position = intersection.transform.position;
@@ -1212,6 +1246,83 @@ namespace RoadCityMaster
         }
 
 
+        /// <summary> Say what the authored form resolves to, in words, directly under the fields that decide it.
+        ///
+        /// The two at-grade forms resolve to a control and to nothing else -- no geometry is derived and no spline is
+        /// sampled -- so they answer in one line and cost nothing per repaint. Only a roundabout or an interchange runs
+        /// the resolve, which is exactly the case where the author is dimensioning something and wants the refusal while
+        /// they are still working on it. B-19's fields commit on focus-out, so every figure quoted here is a committed
+        /// one rather than a half-typed one, which is what makes a live verdict readable instead of flickering.
+        ///
+        /// A report, never a control: nothing here writes to the component, and `junctionPlan` is [NonSerialized], so the
+        /// resolve caching into it leaves no scene diff and no dirty flag behind. </summary>
+        private void DrawJunctionVerdict(RoadIntersection intersection)
+        {
+            if (intersection == null)
+            {
+                return;
+            }
+
+            if (City.JunctionForm.IsAtGrade(intersection.junctionType))
+            {
+                EditorGUILayout.LabelField("Resolves to", ControlDescription(intersection.ResolveControl()));
+                return;
+            }
+
+            City.JunctionPlan plan = intersection.ResolveJunction();
+            if (!plan.resolved)
+            {
+                EditorGUILayout.HelpBox(plan.message, MessageType.Warning);
+                return;
+            }
+
+            if (plan.form == City.JunctionTypeEnum.Roundabout)
+            {
+                EditorGUILayout.LabelField("Circulatory way", plan.circulatoryWidthMetres.ToString("0.##")
+                    + " m wide around a " + plan.centralIslandDiameterMetres.ToString("0.##") + " m island");
+                EditorGUILayout.LabelField("Tightest leg gap", plan.worstLegSeparationDeg.ToString("0.#") + " deg");
+                EditorGUILayout.LabelField("Circulating plane", plan.circulatoryPlaneElevationMetres.ToString("0.##")
+                    + " m, worst approach change " + plan.worstApproachGradientChangePercent.ToString("0.##") + " %");
+                return;
+            }
+
+            EditorGUILayout.LabelField("Raised road", (plan.raisedRoadIsA ? "first" : "second") + ", by "
+                + plan.raiseHeightMetres.ToString("0.##") + " m over "
+                + plan.requiredApproachLengthMetres.ToString("0.#") + " m of approach on each side");
+            EditorGUILayout.LabelField("Deck span to mark", plan.bridgeSpanStartMetres.ToString("0.#") + " m to "
+                + plan.bridgeSpanEndMetres.ToString("0.#") + " m along it");
+            EditorGUILayout.LabelField("Each ramp", plan.rampLengthMetres.ToString("0.#") + " m long, radius "
+                + plan.rampRadiusMetres.ToString("0.#") + " m, grade "
+                + (plan.rampGradientFraction * 100.0).ToString("0.##") + " %");
+        }
+
+
+        /// <summary> The one place the four controls are put into words. The control is DERIVED from the form by
+        /// <see cref="City.JunctionForm.ControlFor"/>, so this names what that decided and decides nothing itself. </summary>
+        private static string ControlDescription(City.JunctionControl control)
+        {
+            switch (control)
+            {
+                case City.JunctionControl.Signals: return "signals, so the timings below apply";
+                case City.JunctionControl.EntryYield: return "yield at every entry, so no stop line is signed";
+                case City.JunctionControl.Uncontrolled: return "no shared surface, so nothing is controlled here";
+                default: return "stop or yield on the minor approach";
+            }
+        }
+
+
+        /// <summary> Ask the road this intersection sits on to rebuild, carrying the second spline with it.
+        ///
+        /// B-14. Two of the three ways this declines were silent, and one of them is what the "Update intersection"
+        /// button does -- the author's only way to say "redo this junction now" -- so a press could answer with nothing
+        /// at all. Both now say why, and only on the forced path. Forced means a discrete gesture: the button, or an
+        /// undo/redo. The unforced path runs from a mouse-up in the Scene view and from F5 held down, so a line per
+        /// call there would be noise rather than a report, and its refusal is the author's own auto-update toggle
+        /// answering exactly as they set it.
+        ///
+        /// The null branch also grew the four dereferences it was missing. It tested node1 and node2 and then read
+        /// `node1.spline.road` on the next line, so a node that outlived its spline or its road threw here instead of
+        /// declining -- and OnSceneGUI reaches this from a mouse-up, with no inspector header guard in front of it. </summary>
         private void TriggerRoadUpdate(bool _isForced = false)
         {
             if (!_isForced && !intersection.isAutoUpdatingIntersection)
@@ -1219,18 +1330,40 @@ namespace RoadCityMaster
                 return;
             }
 
-            if (intersection != null && intersection.node1 != null && intersection.node2 != null)
+            if (intersection == null || intersection.node1 == null || intersection.node2 == null
+                || intersection.node1.spline == null || intersection.node2.spline == null
+                || intersection.node1.spline.road == null || intersection.node2.spline.road == null)
             {
-                if (!intersection.node1.spline.road.isEditorConstructing && !intersection.node2.spline.road.isEditorConstructing)
+                if (_isForced)
                 {
-                    if (!intersection.isSameSpline)
-                    {
-                        intersection.node1.spline.road.PiggyBacks = new SplineC[1];
-                        intersection.node1.spline.road.PiggyBacks[0] = intersection.node2.spline;
-                    }
-                    intersection.node1.spline.road.isUpdateRequired = true;
+                    string label = intersection == null ? "An intersection" : "\"" + intersection.name + "\"";
+                    Debug.LogWarning("Road & City Master: " + label + " could not be updated, because it has lost one of"
+                        + " the two road nodes it was made from. It is left over from a road or node that was deleted,"
+                        + " and deleting this GameObject is safe.");
                 }
+                return;
             }
+
+            if (intersection.node1.spline.road.isEditorConstructing || intersection.node2.spline.road.isEditorConstructing)
+            {
+                if (_isForced)
+                {
+                    Road building = intersection.node1.spline.road.isEditorConstructing
+                        ? intersection.node1.spline.road : intersection.node2.spline.road;
+                    Debug.Log("Road & City Master: \"" + intersection.name + "\" was not updated, because \""
+                        + building.name + "\" is being built right now and an intersection cannot be laid into a road"
+                        + " mid-build. Watch that build finish in Unity's Background Tasks, then press Update"
+                        + " intersection again.");
+                }
+                return;
+            }
+
+            if (!intersection.isSameSpline)
+            {
+                intersection.node1.spline.road.PiggyBacks = new SplineC[1];
+                intersection.node1.spline.road.PiggyBacks[0] = intersection.node2.spline;
+            }
+            intersection.node1.spline.road.isUpdateRequired = true;
         }
 
 
@@ -1241,8 +1374,6 @@ namespace RoadCityMaster
 
             EditorUtilities.LoadTexture(ref refreshButtonTexture, basePath + "/Editor/Icons/refresh2.png");
             EditorUtilities.LoadTexture(ref deleteButtonTexture, basePath + "/Editor/Icons/delete.png");
-            EditorUtilities.LoadTexture(ref loadButtonBG, basePath + "/Editor/Icons/otherbg.png");
-            EditorUtilities.LoadTexture(ref loadButtonBGGlow, basePath + "/Editor/Icons/otherbg2.png");
 
             if (imageButton == null)
             {
@@ -1253,26 +1384,18 @@ namespace RoadCityMaster
                 imageButton.padding = new RectOffset(0, 0, 0, 0);
                 imageButton.normal.background = null;
             }
-            if (loadButton == null)
-            {
-                loadButton = new GUIStyle(GUI.skin.button);
-                loadButton.contentOffset = new Vector2(0f, 1f);
-                loadButton.normal.textColor = new Color(1f, 1f, 1f, 1f);
-                loadButton.normal.background = loadButtonBG;
-                loadButton.active.background = loadButtonBGGlow;
-                loadButton.focused.background = loadButtonBGGlow;
-                loadButton.hover.background = loadButtonBGGlow;
-                loadButton.fixedHeight = 16f;
-                loadButton.fixedWidth = 128f;
-            }
         }
 
 
+        /// <summary> The legend for the reset icon that sits on the material rows. B-14: the five legends in this
+        /// inspector all drew their glyph with GUILayout.Button and threw the result away -- pictures that highlight
+        /// under the cursor and depress when clicked, in a tool whose real reset icons look exactly the same. Drawn with
+        /// Label instead, in the same style, so the glyph is identical and the press is not offered. </summary>
         private void DoDefaultHelpMat()
         {
             GUILayout.Space(4f);
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
+            GUILayout.Label(refreshButtonTexture, imageButton, GUILayout.Width(16f));
             EditorGUILayout.LabelField(" = Resets material(s) to default materials.");
             EditorGUILayout.EndHorizontal();
         }
@@ -1282,7 +1405,8 @@ namespace RoadCityMaster
         {
             GUILayout.Space(4f);
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f));
+            // B-14. A legend, not a control -- see DoDefaultHelpMat.
+            GUILayout.Label(deleteButtonTexture, imageButton, GUILayout.Width(16f));
             EditorGUILayout.LabelField(" = Removes material(s) from intersection.");
             EditorGUILayout.EndHorizontal();
         }

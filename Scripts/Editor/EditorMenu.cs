@@ -15,7 +15,12 @@ namespace RoadCityMaster
     /// road system qualifies -- no RoadSystem exists yet, so no inspector can offer it. Add road, Update all roads and
     /// Help do not: all three were already buttons in <see cref="RoadSystemEditor"/>, drawn on the object they act on,
     /// so the menu rows were a second way to press the same button. The methods stay public and unchanged, because the
-    /// inspector, the tests and any author's own editor script call them directly; only the attributes are gone. </summary>
+    /// inspector, the tests and any author's own editor script call them directly; only the attributes are gone.
+    ///
+    /// C-3 adds a sixth row, <i>Create city</i>, and it earns its place by the same test: a settlement is a sibling of
+    /// the roads under a <c>RoadSystem</c> parent, so in a scene that has none there is nothing an author could select to
+    /// reach it. Every other case is the <i>Add city</i> button on the road system's own inspector, and both press the
+    /// same implementation in <c>CitySettlementFactory</c> rather than carrying a copy each. </summary>
     public class EditorMenu
     {
         /// <summary> Creates the road system.
@@ -39,35 +44,52 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> Add road to gameobject. Not sure if this is necessary.
+        /// <summary> Creates one settlement, and the road system to hold it when the scene has none yet.
         ///
-        /// No menu item: RM-108. The RoadSystem inspector's own "Add road" button calls
-        /// <c>roadSystem.AddRoad()</c> on the system an author has selected, which is both fewer clicks and
-        /// unambiguous about which system gains the road. This entry point differs only in picking the FIRST
-        /// RoadSystem in the scene for you, which is a guess in any scene holding more than one, so it is kept for
-        /// scripted use and no longer offered as a command. </summary>
-        public static void AddRoad()
+        /// This row resolves WHICH road system and nothing else; the creation itself -- the GameObject, the
+        /// <c>CityAuthoring</c>, the five branches, the graph, the seed, the one undo step -- is
+        /// <c>CitySettlementFactory.CreateCity</c>, the same method the inspector button presses.
+        ///
+        /// It refuses rather than guessing when the scene holds several road systems and none of them is selected:
+        /// putting the city under the first one found would be the tool choosing a parent the author did not. A city
+        /// added this way records no source road, so it carries no order until the author draws the network and sweeps
+        /// it -- which the report says, because a settlement with no order is otherwise a silent surprise at bake time.
+        /// </summary>
+        [MenuItem("Window/Road City Master/Create city", false, 1)]
+        public static void CreateCity()
         {
-            Object[] allRoadSystemObjects = EngineIntegration.FindObjectsByType<RoadSystem>();
-            if (allRoadSystemObjects != null && allRoadSystemObjects.Length == 0)
+            RoadSystem system;
+            string reason;
+            if (!TryResolveSystemForCity(out system, out reason))
             {
-                CreateRoadSystem();
+                Debug.LogWarning("Road & City Master: " + reason + ".");
                 return;
             }
-            else
+            RoadCityMaster.City.CityAuthoring created;
+            if (!RoadCityMaster.City.Editor.CitySettlementFactory.CreateCity(system, null,
+                    RoadCityMaster.City.Editor.CitySettlementFactory.DefaultPlacementPoint(), null,
+                    RoadCityMaster.City.RoadEnd.Start, true, out created, out reason))
             {
-                RoadSystem firstRoadSystem = (RoadSystem)allRoadSystemObjects[0];
-                Selection.activeGameObject = firstRoadSystem.AddRoad();
+                Debug.LogWarning("Road & City Master: " + reason + ".");
+                return;
             }
+            Debug.Log("Road & City Master: added the settlement " + created.name + " under " + system.name
+                      + ". It records no source road, so it has no order yet -- a settlement's order comes from the"
+                      + " settlement role on the road at the terminus it was sited from. Draw the network, set those"
+                      + " roles, and Build settlements from roads places the settlements that carry one.");
         }
 
 
         /// <summary> Show the help screen.
         ///
-        /// No menu item: RM-108. The RoadSystem inspector draws it as a "Quick help" button beside "Manual", which is
-        /// where an author reads about the object in front of them. The window itself is three paragraphs of
-        /// orientation -- the full text lives in RoadCityMasterManual.html -- so a top-level menu row for it sat beside
-        /// Open Manual offering strictly less. </summary>
+        /// No menu item, and the reason is not the one RM-108 gave. RM-108 deleted the menu row on the stated ground
+        /// that "the RoadSystem inspector draws it as a Quick help button beside Manual" -- which was false when it was
+        /// written: nothing in the tool called this method and nothing else opened <see cref="HelpWindow"/>, so the
+        /// window was unreachable from the product. B-14 supplied the button the claim described, in
+        /// <c>RoadSystemEditor.cs</c>, and <see cref="LegacyInspectorGate"/> case 9 now asserts both hops -- the
+        /// inspector calls <c>EditorMenu.ShowHelpWindow(</c>, and this method opens the window. That makes the
+        /// no-menu-row decision correct on its own terms: an author reads about the object in front of them, and the
+        /// full text lives in the HTML manual that Open Manual opens. This stays the only opener. </summary>
         public static void ShowHelpWindow()
         {
             HelpWindow helpWindow = EditorWindow.GetWindow<HelpWindow>();
@@ -181,6 +203,47 @@ namespace RoadCityMaster
             // tool this one has diverged from, who cannot fix code they do not have. It goes to this project now,
             // and the address lives in one place: EditorUtilities.ProjectRepositoryURL.
             EditorUtilities.OpenProjectIssues();
+        }
+
+
+        /// <summary> Which road system a menu-created settlement belongs under: the selection first, then the only one in
+        /// the scene, and a new one when the scene has none. Several with nothing selected is a refusal, not a pick.
+        ///
+        /// The selection is asked FIRST and through <c>GetComponentInParent</c>, so selecting a road answers it as well
+        /// as selecting the system -- an author working on a road is working on its system. </summary>
+        private static bool TryResolveSystemForCity(out RoadSystem system, out string reason)
+        {
+            system = null;
+            GameObject selected = Selection.activeGameObject;
+            if (selected != null)
+            {
+                system = selected.GetComponentInParent<RoadSystem>();
+                if (system != null) { reason = string.Empty; return true; }
+            }
+            Object[] allRoadSystemObjects = EngineIntegration.FindObjectsByType<RoadSystem>();
+            int count = allRoadSystemObjects == null ? 0 : allRoadSystemObjects.Length;
+            if (count == 0)
+            {
+                CreateRoadSystem();
+                allRoadSystemObjects = EngineIntegration.FindObjectsByType<RoadSystem>();
+                count = allRoadSystemObjects == null ? 0 : allRoadSystemObjects.Length;
+            }
+            if (count == 1)
+            {
+                system = (RoadSystem)allRoadSystemObjects[0];
+                reason = string.Empty;
+                return true;
+            }
+            if (count == 0)
+            {
+                reason = "no road system exists and one could not be created, so there is nothing to put a settlement"
+                         + " under";
+                return false;
+            }
+            reason = "this scene holds " + count + " road systems and none of them is selected, so which one the"
+                     + " settlement belongs under is the author's answer and not the tool's. Select the road system --"
+                     + " or any road under it -- and press Add city on its inspector";
+            return false;
         }
     }
 }

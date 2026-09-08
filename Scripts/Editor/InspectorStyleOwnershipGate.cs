@@ -414,11 +414,25 @@ namespace RoadCityMaster
             + @"|Vector2Field|Vector3Field|Vector4Field|EnumPopup|Popup|IntPopup|LayerField|TagField|MaskField)"
             + @"\s*\(\s*""([^""]*)""\s*,");
 
+        /// <summary> The other way this tool now writes a prefix label: inside a `GUIContent`, because B-5 gave every
+        /// control a tooltip and a tooltip has nowhere else to go. `new GUIContent("Lane width", "...")` reaches the same
+        /// label column as `FloatField("Lane width", ...)` did, and the regex above cannot see it -- so without this the
+        /// yardstick sweep would have gone quietly blind to the very files B-5 rewrote, which is how a sized column
+        /// becomes a narrow one again.
+        ///
+        /// Only the FIRST argument is captured, and only when it is a literal. The second is the tooltip: a sentence,
+        /// never a prefix label, and comparing it against the yardstick would fail on every well-described field in the
+        /// tool. A `GUIContent` built from a variable is invisible here for the same reason it is invisible above -- a
+        /// sweep over source text can only measure the strings that are IN the source text. </summary>
+        private static readonly Regex GuiContentLabel = new Regex(
+            @"new\s+GUIContent\s*\(\s*""([^""]*)""");
+
         /// <summary> Case 6. The column is measured from ONE string, <see cref="InspectorTextLayout.WidestLabel"/>. Add
         /// a longer prefix label anywhere in the tool and that measurement quietly becomes too narrow again -- which is
         /// the fault B-4 was, arrived at from the other direction. So the sweep that found the yardstick is re-run here,
-        /// over both ways this tool draws a prefix label: the legacy `EditorGUILayout` calls with a literal, and RM-51's
-        /// registry, whose labels the drawer composes with a unit suffix.
+        /// over all three ways this tool draws a prefix label: the legacy `EditorGUILayout` calls with a literal, the
+        /// `GUIContent` form B-5 moved the tooltipped controls onto, and RM-51's registry, whose labels come from the
+        /// descriptor rather than from any literal in the file.
         ///
         /// Compared by character count, not pixels. A 33-character label of narrow glyphs can be narrower than a
         /// 32-character one, so this can in principle flag a label that would have fitted; the cost of that is one
@@ -435,25 +449,21 @@ namespace RoadCityMaster
                 string[] lines = File.ReadAllLines(sources[i]);
                 for (int l = 0; l < lines.Length; l++)
                 {
-                    MatchCollection found = PrefixLabelCall.Matches(WithoutComment(lines[l]));
-                    for (int m = 0; m < found.Count; m++)
-                    {
-                        string label = found[m].Groups[1].Value;
-                        if (label.Length <= longest.Length) { continue; }
-                        longest = label;
-                        where = Path.GetFileName(sources[i]) + ":" + (l + 1).ToString();
-                    }
+                    string code = WithoutComment(lines[l]);
+                    Widest(PrefixLabelCall.Matches(code), sources[i], l, ref longest, ref where);
+                    Widest(GuiContentLabel.Matches(code), sources[i], l, ref longest, ref where);
                 }
             }
 
-            // RM-51's fields are labelled from the registry rather than from a literal at the call site, and the drawer
-            // appends the unit -- so the string that actually reaches the column is the COMPOSED one. Composed the same
-            // way here on purpose: if InspectorFieldDrawer changes the form, this has to change with it.
+            // RM-51's fields are labelled from the registry rather than from a literal at the call site, so the string
+            // that reaches the column is the descriptor's own label. It used to be that label with the unit appended,
+            // composed here to match the drawer exactly; B-5 fault 5 moved the unit into a column of its own, so the
+            // label is now simply the label. The coupling this comment recorded still holds in the other direction: if
+            // the drawer ever puts anything back into the prefix label, this has to compose it too.
             IList<FieldDescriptor> fields = InspectorFieldRegistry.All();
             for (int i = 0; i < fields.Count; i++)
             {
-                string unit = fields[i].UnitLabel();
-                string label = string.IsNullOrEmpty(unit) ? fields[i].label : fields[i].label + "  (" + unit + ")";
+                string label = fields[i].label;
                 if (label.Length <= longest.Length) { continue; }
                 longest = label;
                 where = "the RM-51 registry, " + fields[i].component + "." + fields[i].field;
@@ -470,6 +480,24 @@ namespace RoadCityMaster
                    .Append(" chars  widest found ").Append(longest.Length)
                    .Append("  registry labels ").Append(fields.Count)
                    .Append("  sources swept ").Append(sources.Length).Append("\n");
+        }
+
+
+        /// <summary> Keep the longest label found so far, over one line's matches from one of the two label patterns.
+        ///
+        /// Its own method because there are two patterns now and the alternative was the same four lines written twice --
+        /// which, on a sweep whose whole purpose is to notice a label the tool stopped measuring, is exactly the place a
+        /// divergence would go unseen. Both patterns capture the label in group 1, which is what lets one body serve
+        /// them. </summary>
+        private static void Widest(MatchCollection found, string source, int line, ref string longest, ref string where)
+        {
+            for (int m = 0; m < found.Count; m++)
+            {
+                string label = found[m].Groups[1].Value;
+                if (label.Length <= longest.Length) { continue; }
+                longest = label;
+                where = Path.GetFileName(source) + ":" + (line + 1).ToString();
+            }
         }
         #endregion
     }

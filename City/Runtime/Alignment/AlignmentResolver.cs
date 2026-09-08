@@ -23,8 +23,46 @@ namespace RoadCityMaster.City
     public static class AlignmentResolver
     {
         /// <summary> Resolve a plan. The road class supplies its own hard minimum radius and the superelevation class
-        /// the design relation; either may be null, in which case what remains is used and the legend says so. </summary>
+        /// the design relation; either may be null, in which case what remains is used and the legend says so.
+        ///
+        /// The staking itself is <see cref="ResolveToStandard"/>. This method is the ROAD entry to it: it works out the
+        /// two governing numbers from the road's own classes and hands them over. Splitting it that way is what lets a
+        /// railway be staked by this same code without a <see cref="RoadClass"/> anywhere near it -- rail's minimum
+        /// radius and rail's transition length come from CANT, not from side friction, and a rail curve judged against
+        /// the road relation is the cross-wiring <see cref="RailTrackClass"/> was written to prevent. </summary>
         public static AlignmentSolution Resolve(HorizontalAlignment plan, RoadClass cls, SuperelevationClass super)
+        {
+            SuperelevationClass design = super != null ? super : SuperelevationClass.Default();
+            double speed = plan != null && plan.designSpeedKmh > 0f ? plan.designSpeedKmh : 0.0;
+            double minimumRadius = MinimumRadiusMetres(speed, cls, design);
+
+            AlignmentSolution solution = ResolveToStandard(plan, minimumRadius,
+                delegate(double radius) { return DefaultTransitionLengthMetres(speed, radius, design); });
+            if (plan == null || plan.PointCount < 2) { return solution; }
+
+            solution.legend = LegendFor(plan, cls, solution.curves, solution, minimumRadius, speed, design,
+                super != null);
+            return solution;
+        }
+
+
+        /// <summary> Stake a plan against a standard given as NUMBERS: the tightest radius the design allows, and a
+        /// rule saying how long a transition a given radius wants. No class of any kind reaches it, which is the
+        /// point of it -- the plane geometry of tangents, transitions and arcs is the same whether the thing staked
+        /// carries lorries or trains, while the STANDARD it is judged by is not, and only one of those two is worth
+        /// writing twice.
+        ///
+        /// <paramref name="transitionLengthForRadius"/> is consulted only for a corner whose authored transition length
+        /// is negative, i.e. one the author asked the tool to work out. It is a function rather than a number since the
+        /// answer depends on the radius, and it is pure in its argument plus what the caller closed over, so a
+        /// repeat call is bit-identical (C-06). Null is allowed and means "no transition unless the author stated one",
+        /// which is the correct reading of a caller that has no comfort criterion to offer.
+        ///
+        /// The legend is left EMPTY here. A legend is written in the vocabulary of the thing being staked -- side
+        /// friction and runoff for a road, cant and deficiency for a railway -- so it belongs to whichever caller knows
+        /// which of those it is. </summary>
+        public static AlignmentSolution ResolveToStandard(HorizontalAlignment plan, double minimumRadiusMetres,
+            Func<double, double> transitionLengthForRadius)
         {
             AlignmentSolution solution = new AlignmentSolution();
             if (plan == null || plan.PointCount < 2)
@@ -33,15 +71,10 @@ namespace RoadCityMaster.City
                 return solution;
             }
 
-            SuperelevationClass design = super != null ? super : SuperelevationClass.Default();
-            double speed = plan.designSpeedKmh > 0f ? plan.designSpeedKmh : 0.0;
-            double minimumRadius = MinimumRadiusMetres(speed, cls, design);
-
-            List<AlignmentCurve> curves = ResolveCurves(plan, minimumRadius, speed, design);
+            List<AlignmentCurve> curves = ResolveCurves(plan, minimumRadiusMetres, transitionLengthForRadius);
             FlagOverlaps(plan, curves);
             BuildElements(plan, curves, solution);
             solution.curves = curves;
-            solution.legend = LegendFor(plan, cls, curves, solution, minimumRadius, speed, design, super != null);
             return solution;
         }
 
@@ -97,7 +130,7 @@ namespace RoadCityMaster.City
         /// <summary> One curve per interior corner, in order. The first and last points are ENDS, not corners: a road
         /// starts pointing somewhere, and there is no second straight at the start to intersect with. </summary>
         private static List<AlignmentCurve> ResolveCurves(HorizontalAlignment plan, double minimumRadius,
-            double designSpeedKmh, SuperelevationClass design)
+            Func<double, double> transitionLengthForRadius)
         {
             List<AlignmentCurve> curves = new List<AlignmentCurve>();
             for (int i = 1; i < plan.points.Count - 1; i++)
@@ -144,7 +177,7 @@ namespace RoadCityMaster.City
 
                 double ls = plan.points[i].transitionLengthMetres >= 0f
                     ? plan.points[i].transitionLengthMetres
-                    : DefaultTransitionLengthMetres(designSpeedKmh, radius, design);
+                    : (transitionLengthForRadius != null ? transitionLengthForRadius(radius) : 0.0);
 
                 // Two transitions cannot turn through more than the corner does. The longest pair that fits leaves no
                 // arc at all -- a real curve form, not a failure -- so the transition is cut to that and said so.

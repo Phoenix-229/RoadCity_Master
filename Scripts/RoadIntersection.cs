@@ -169,6 +169,244 @@ namespace RoadCityMaster
         public RoadTypeEnum roadType = RoadTypeEnum.NoTurnLane;
         public LightTypeEnum lightType = LightTypeEnum.Timed;
 
+        #region "B-16 junction form"
+        /// <summary> What SHAPE this junction takes. `intersectionType` says how many legs meet and
+        /// `intersectionStopType` says who waits; this says whether they meet on one surface at all. The two at-grade
+        /// forms leave the existing geometry exactly as it is -- only the stop control they permit differs -- while a
+        /// roundabout replaces the crossing surface with a circulatory way and an interchange keeps the crossing and
+        /// ADDS a flyover and ramps beside it. </summary>
+        public City.JunctionTypeEnum junctionType = City.JunctionTypeEnum.Priority;
+
+        /// <summary> Inscribed circle diameter for the roundabout form, metres: the outer circle the legs trim to.
+        /// Refused below the diameter the class's circulatory width and minimum circulating radius imply. </summary>
+        public float roundaboutInscribedDiameterMetres = 40f;
+
+        /// <summary> Entry width of one approach lane at the yield line, metres; the circulatory carriageway width is
+        /// derived from it, so it sizes the ring and therefore the island. </summary>
+        public float roundaboutEntryWidthMetres = 4.5f;
+
+        /// <summary> Splitter-island length on the shortest leg, metres -- the leg that has to clear the minimum, since
+        /// the others are longer by definition. </summary>
+        public float roundaboutSplitterIslandLengthMetres = 15f;
+
+        /// <summary> Headroom the raised road must leave over the road beneath it, metres. This is what sets how far it
+        /// climbs, and therefore how much approach length it needs on each side. </summary>
+        public float interchangeVerticalClearanceMetres = 5.1f;
+
+        /// <summary> How the connecting ramp is laid out: straight off the mainline, part-way around, or a full loop.
+        /// The choice sets how far the ramp has to turn and so how long its curve must be. </summary>
+        public City.RampAlignmentKind rampAlignment = City.RampAlignmentKind.Direct;
+
+        /// <summary> Plan radius asked of the ramp curve, metres. Refused below the radius its design speed and
+        /// superelevation allow, because a curve that cannot be driven at the speed it is signed for is not a ramp.
+        ///
+        /// The default is the DERIVED floor, not a round number: at the ramp class's 50 km/h design speed the published
+        /// relation R = V^2 / (127 (e + f)) with e = 0.06 and the tabulated f = 0.16 gives 89.5 m, which is well above
+        /// the class's own 50 m house minimum, so 90 m is the smallest radius a fresh interchange can actually be built
+        /// at. Defaulting to the house minimum instead would have opened every new junction already refusing itself.
+        /// </summary>
+        public float rampRadiusMetres = 90f;
+
+        /// <summary> Deck length to mark as bridge on the raised road, metres. The deck itself is an author prefab
+        /// loaded onto the span's nodes; this only says how long the span is. </summary>
+        public float flyoverSpanLengthMetres = 30f;
+
+        /// <summary> Whether the last resolve refused, and why, for the inspector to quote back. Construction scratch:
+        /// it is re-derived on every resolve and must not persist in the scene file. </summary>
+        [System.NonSerialized]
+        public City.JunctionPlan junctionPlan;
+
+        /// <summary> The right of way this form implies, derived rather than stored. </summary>
+        public City.JunctionControl ResolveControl()
+        {
+            return City.JunctionForm.ControlFor(junctionType);
+        }
+
+        /// <summary> Whether the authored stop control is one this FORM can actually carry. The form does not replace
+        /// `intersectionStopType` -- every traffic-light path still reads it -- it constrains which values of it mean
+        /// anything: a roundabout has no stop line to sign and a flyover has no shared surface to signal. Returns true
+        /// with an empty refusal when the pair is consistent. </summary>
+        public bool StopTypeIsCompatible(out string refusal)
+        {
+            refusal = string.Empty;
+            switch (ResolveControl())
+            {
+                case City.JunctionControl.Signals:
+                    if (intersectionStopType == iStopTypeEnum.TrafficLight1
+                        || intersectionStopType == iStopTypeEnum.TrafficLight2) { return true; }
+                    refusal = "a signalised junction is controlled by signal heads, so its stop control has to be"
+                        + " TrafficLight1 or TrafficLight2, not " + intersectionStopType;
+                    return false;
+
+                case City.JunctionControl.EntryYield:
+                    if (intersectionStopType == iStopTypeEnum.None) { return true; }
+                    refusal = "a roundabout is entered by yielding to traffic already circulating, so it has no stop"
+                        + " line and no signal to set; its stop control has to be None, not " + intersectionStopType;
+                    return false;
+
+                case City.JunctionControl.Uncontrolled:
+                    if (intersectionStopType == iStopTypeEnum.None) { return true; }
+                    refusal = "at an interchange the two roads never share a surface, so there is nothing at the"
+                        + " crossing to control; its stop control has to be None, not " + intersectionStopType;
+                    return false;
+
+                default:
+                    if (intersectionStopType == iStopTypeEnum.StopSign_AllWay
+                        || intersectionStopType == iStopTypeEnum.None) { return true; }
+                    refusal = "a priority junction assigns the right of way by sign, so its stop control has to be"
+                        + " StopSign_AllWay or None; " + intersectionStopType + " needs the Signalised form";
+                    return false;
+            }
+        }
+
+        /// <summary> Assemble everything the form needs and hand it to <see cref="City.JunctionForm.Resolve"/>, leaving
+        /// the answer in <see cref="junctionPlan"/> for the inspector. Nothing is computed here that an operator owns:
+        /// this reads the authored fields, samples the two splines for the leg geometry a roundabout needs, and ranks
+        /// the two roads for the flyover. Returns a refused plan -- never a guess -- when either node has no road.
+        ///
+        /// Leg geometry, for the roundabout form: a junction of two roads has four arms, and
+        /// <see cref="intersectionType"/> already says whether the fourth exists. Which of the terminating road's two
+        /// arms is the absent one does not change the separation verdict: the three-leg set is either
+        /// {b1, b1+180, b2} or {b1, b1+180, b2+180}, and both have the same pair of adjacent gaps by symmetry. Each
+        /// leg is sampled at the inscribed circle edge rather than at the junction centre, because that is where it
+        /// meets the circulatory way -- sampling the centre would give all four arms one elevation and turn the
+        /// approach-gradient check into a formality. </summary>
+        public City.JunctionPlan ResolveJunction()
+        {
+            Road roadA = node1 != null && node1.spline != null ? node1.spline.road : null;
+            Road roadB = node2 != null && node2.spline != null ? node2.spline.road : null;
+            junctionPlan = new City.JunctionPlan();
+            junctionPlan.form = junctionType;
+            junctionPlan.control = ResolveControl();
+            if (roadA == null || roadB == null)
+            {
+                junctionPlan.flagged = true;
+                junctionPlan.message = "junction '" + IntersectionName() + "' cannot be resolved: "
+                    + (roadA == null ? "the first" : "the second") + " approach has no road behind its node.";
+                return junctionPlan;
+            }
+
+            City.JunctionRequest request = new City.JunctionRequest();
+            request.form = junctionType;
+            request.roundabout = RoundaboutClassFromFields();
+            request.separation = new City.GradeSeparationClass();
+            request.separation.verticalClearanceMetres = interchangeVerticalClearanceMetres;
+            request.splitterIslandLengthMetres = roundaboutSplitterIslandLengthMetres;
+            request.rampAlignment = rampAlignment;
+            request.rampRequestedRadiusMetres = rampRadiusMetres;
+            request.spanLengthMetres = flyoverSpanLengthMetres;
+
+            List<double> bearings = new List<double>();
+            List<double> elevations = new List<double>();
+            List<double> approaches = new List<double>();
+            double halfDiameter = roundaboutInscribedDiameterMetres * 0.5f;
+            AddArms(node1, halfDiameter, true, bearings, elevations, approaches);
+            AddArms(node2, halfDiameter, intersectionType == IntersectionTypeEnum.FourWay,
+                bearings, elevations, approaches);
+            request.legBearingsDeg = bearings;
+            request.legElevationsMetres = elevations;
+            request.legApproachLengthsMetres = approaches;
+            request.roadAngleBetweenDegrees = ArmAngleBetweenDegrees();
+
+            FillInterchange(request, roadA, roadB);
+            junctionPlan = City.JunctionForm.Resolve(request);
+            return junctionPlan;
+        }
+
+        /// <summary> The roundabout class this junction authored: the NCHRP defaults with the three fields the author
+        /// is given control of overridden, so every figure the author did not touch stays the cited one. </summary>
+        private City.RoundaboutClass RoundaboutClassFromFields()
+        {
+            City.RoundaboutClass cls = City.RoundaboutClass.Default();
+            cls.inscribedCircleDiameterMetres = roundaboutInscribedDiameterMetres;
+            cls.entryWidthMetres = roundaboutEntryWidthMetres;
+            cls.minSplitterIslandLengthMetres = roundaboutSplitterIslandLengthMetres;
+            return cls;
+        }
+
+        /// <summary> Add one road's arms as legs: its bearing, its elevation where it meets the inscribed circle, and
+        /// how much road that arm has left to reach the circulatory plane over. The forward arm is always added; the
+        /// arm behind the node is added only when the junction has a fourth leg. </summary>
+        private static void AddArms(SplineN node, double halfDiameterMetres, bool includeArmBehind,
+            List<double> bearings, List<double> elevations, List<double> approaches)
+        {
+            if (node == null || node.spline == null) { return; }
+            float length = node.spline.distance;
+            float forwardBearing = Mathf.Atan2(node.tangent.x, node.tangent.z) * Mathf.Rad2Deg;
+            if (length <= 0f)
+            {
+                bearings.Add(forwardBearing);
+                elevations.Add(node.pos.y);
+                approaches.Add(0.0);
+                if (includeArmBehind)
+                {
+                    bearings.Add(forwardBearing + 180f);
+                    elevations.Add(node.pos.y);
+                    approaches.Add(0.0);
+                }
+                return;
+            }
+
+            float edgeStep = (float)(halfDiameterMetres / length);
+            float ahead = Mathf.Clamp01(node.time + edgeStep);
+            bearings.Add(forwardBearing);
+            elevations.Add(node.spline.GetSplineValue(ahead).y);
+            approaches.Add((1f - ahead) * length);
+            if (!includeArmBehind) { return; }
+
+            float behind = Mathf.Clamp01(node.time - edgeStep);
+            bearings.Add(forwardBearing + 180f);
+            elevations.Add(node.spline.GetSplineValue(behind).y);
+            approaches.Add(behind * length);
+        }
+
+        /// <summary> The plan angle between the two roads at this junction, degrees, 0-180. </summary>
+        private double ArmAngleBetweenDegrees()
+        {
+            if (node1 == null || node2 == null) { return 90.0; }
+            Vector3 a = new Vector3(node1.tangent.x, 0f, node1.tangent.z);
+            Vector3 b = new Vector3(node2.tangent.x, 0f, node2.tangent.z);
+            if (a.sqrMagnitude < 0.000001f || b.sqrMagnitude < 0.000001f) { return 90.0; }
+            return Vector3.Angle(a.normalized, b.normalized);
+        }
+
+        /// <summary> Fill the flyover half of the request. The class RANK is each road's design speed in km/h -- a
+        /// cited figure that already orders the classes by how major they are, unlike the enum's own ordering, which
+        /// puts a service lane and a footpath after a motorway. The identifier tie-break, used only when the two ranks
+        /// are equal, is an ordinal comparison of the two node uIDs, so it is stable across sessions where an instance
+        /// id would not be. Which road rises is asked of <see cref="City.GradeSeparation.ChooseRaisedRoad"/> here as
+        /// well, purely to know whose approach length to measure; it is the same deterministic call the resolver makes,
+        /// not a second copy of the rule. The ramp's plan distance is the approach the raised road needs, because a
+        /// ramp runs from the deck back down to the road below and that is how far that is. </summary>
+        private void FillInterchange(City.JunctionRequest request, Road roadA, Road roadB)
+        {
+            RoadClassProfile profileA = RoadClassDefaults.For(roadA.roadClass);
+            RoadClassProfile profileB = RoadClassDefaults.For(roadB.roadClass);
+            request.classRankA = (int)profileA.DesignSpeedKPH;
+            request.classRankB = (int)profileB.DesignSpeedKPH;
+            request.maxGradientFractionA = profileA.MaxGrade;
+            request.maxGradientFractionB = profileB.MaxGrade;
+
+            bool aWinsTieBreak = string.CompareOrdinal(node1uID ?? string.Empty, node2uID ?? string.Empty) >= 0;
+            request.identifierA = aWinsTieBreak ? 1 : 0;
+            request.identifierB = aWinsTieBreak ? 0 : 1;
+
+            bool raiseA = City.GradeSeparation.ChooseRaisedRoad(request.classRankA, request.identifierA,
+                request.classRankB, request.identifierB) == 0;
+            SplineN raisedNode = raiseA ? node1 : node2;
+            double raisedGradient = raiseA ? request.maxGradientFractionA : request.maxGradientFractionB;
+            float raisedLength = raisedNode != null && raisedNode.spline != null ? raisedNode.spline.distance : 0f;
+            float raisedTime = raisedNode != null ? raisedNode.time : 0f;
+            request.raisedRoadLengthMetres = raisedLength;
+            request.crossingStationMetres = raisedTime * raisedLength;
+            double ahead = (1f - raisedTime) * raisedLength;
+            double behind = raisedTime * raisedLength;
+            request.availableApproachLengthMetres = ahead < behind ? ahead : behind;
+            request.rampPlanDistanceMetres = City.GradeSeparation.RequiredApproachLengthMetres(
+                interchangeVerticalClearanceMetres, raisedGradient);
+        }
+        #endregion
+
         #region "CalculationData"
         // Allocated by Intersections.InitializeIntersectionObjectsInternal on every construction pass, so it is
         // construction scratch and is marked as such: serialization skipped it in any case, and the attribute says so

@@ -314,12 +314,12 @@ namespace RoadCityMaster.City
             return drift;
         }
 
-        private static bool InSpan(List<KeyValuePair<float, float>> spans, float t)
+        private static bool InSpan(List<SplineSpan> spans, float t)
         {
             if (spans == null) { return false; }
             for (int i = 0; i < spans.Count; i++)
             {
-                if (t >= spans[i].Key && t <= spans[i].Value) { return true; }
+                if (t >= spans[i].start && t <= spans[i].end) { return true; }
             }
             return false;
         }

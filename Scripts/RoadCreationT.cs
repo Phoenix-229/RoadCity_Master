@@ -2394,10 +2394,19 @@ namespace RoadCityMaster.Threading
                 // number fitted once. CarriagewaySection.ShoulderFallMetres returns it: at the normal 4% shoulder
                 // cross-slope a 2.5 m shoulder gives 0.10 m, which is what the hand-found value happened to be, and
                 // a narrower or wider shoulder now moves with it instead of staying put.
-                RampR_R.y -= (_road.desiredRampHeight + (float)CrossSection.CarriagewaySection.ShoulderFallMetres(shoulderWidth));
+                //
+                // RM-110 (B-9) passes the road's own cross-slope instead of letting the width-only overload supply
+                // the 4% default. RM-94 made the fall follow the width; the slope was still a constant nobody could
+                // reach, so a shoulder could not be steepened for drainage or flattened to meet an existing verge.
+                // The two-argument overload clamps into AASHTO's 2%-6% band and falls back to the normal figure for a
+                // zero, so a road serialised before this field existed -- and one whose author typed 0 -- builds
+                // exactly the geometry it built before.
+                RampR_R.y -= (_road.desiredRampHeight
+                    + (float)CrossSection.CarriagewaySection.ShoulderFallMetres(shoulderWidth, _road.shoulderCrossSlope));
                 RampL_L = (tVect + new Vector3(RampOuterWidthL * -POS.normalized.z, 0, RampOuterWidthL * POS.normalized.x));
                 SetVectorHeight2(ref RampL_L, ref i, ref spline.HeightHistory, ref spline);
-                RampL_L.y -= (_road.desiredRampHeight + (float)CrossSection.CarriagewaySection.ShoulderFallMetres(shoulderWidth));
+                RampL_L.y -= (_road.desiredRampHeight
+                    + (float)CrossSection.CarriagewaySection.ShoulderFallMetres(shoulderWidth, _road.shoulderCrossSlope));
 
 
 
@@ -6984,10 +6993,15 @@ namespace RoadCityMaster.Threading
                 // point falls back to its own world height dropped by the shoulder. It is now the shoulder's fall, so
                 // the fallback lands where the built shoulder edge would have. A spline with no road behind it, or a
                 // road with no shoulder, has no fall to apply and keeps the world height it already has.
+                //
+                // RM-110 (B-9) passes the road's own cross-slope, for the same reason as at the ramp vertices and so
+                // that this fallback keeps agreeing with them: two places computing the same shoulder edge from
+                // different slopes would put a seam in the mesh wherever the height history happened to be silent.
                 float shoulderFall = 0f;
                 if (_spline != null && _spline.road != null)
                 {
-                    shoulderFall = (float)CrossSection.CarriagewaySection.ShoulderFallMetres(_spline.road.shoulderWidth);
+                    shoulderFall = (float)CrossSection.CarriagewaySection.ShoulderFallMetres(
+                        _spline.road.shoulderWidth, _spline.road.shoulderCrossSlope);
                 }
                 cValue = _worldVector.y - shoulderFall;
             }

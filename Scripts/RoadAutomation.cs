@@ -57,6 +57,15 @@ namespace RoadCityMaster.Roads
             //Set node location:
             //Lift the node clear of the ground under it. RM-94: this used to compare against absolute world Y and
             //clamp to 0.03 m, which is only "just above the ground" when the terrain happens to sit at the origin.
+            //B-13: a position with no terrain under it is refused, not lifted. CreateRoadProgrammatically feeds this
+            //a list of points and ignores what comes back, so a point off the terrain now costs that one node and a
+            //named warning instead of a node in open air that every later pass tries to sample ground beneath.
+            if (!RoadNodeGround.IsOverTerrain(_nodePosition))
+            {
+                Debug.LogWarning(RoadNodeGround.NoTerrainMessage(_nodePosition));
+                Object.DestroyImmediate(nodeObj);
+                return null;
+            }
             _nodePosition = RoadNodeGround.Lift(_nodePosition);
             nodeObj.transform.position = _nodePosition;
 
@@ -93,6 +102,13 @@ namespace RoadCityMaster.Roads
 
             //Set node location:
             //Lift the node clear of the ground under it (RM-94; see RoadNodeGround).
+            //B-13: refused where no terrain covers the point, for the reason CreateNodeProgrammatically states.
+            if (!RoadNodeGround.IsOverTerrain(_nodePosition))
+            {
+                Debug.LogWarning(RoadNodeGround.NoTerrainMessage(_nodePosition));
+                Object.DestroyImmediate(nodeObj);
+                return null;
+            }
             _nodePosition = RoadNodeGround.Lift(_nodePosition);
             nodeObj.transform.position = _nodePosition;
 

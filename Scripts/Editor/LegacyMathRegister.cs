@@ -293,7 +293,16 @@ namespace RoadCityMaster
                 + "instead of being dropped below its own surface. The bare 0.35 subtracted from a world Y in "
                 + "SetVectorHeight2's zero-protection fallback was the same drop for the same purpose and now reads "
                 + "the same function through SplineC.road, guarded for a spline with no road and a road with no "
-                + "shoulder. The three-values-tried comment is gone from the source; this row is its record."));
+                + "shoulder. The three-values-tried comment is gone from the source; this row is its record. "
+                + "EXTENDED (RM-110, B-9): the slope is now the author's own -- Road.shoulderCrossSlope, drawn in the "
+                + "inspector beside the width it applies across -- rather than the band's normal figure supplied as a "
+                + "default nobody could reach. Nothing about the derivation changed: the same function clamps the "
+                + "authored figure into the same 2% to 6% band and still falls back to the 4% normal for a zero or a "
+                + "negative, so a road serialised before the field existed builds the geometry it always built, and "
+                + "the inspector's stated range is read from the constants the clamp uses rather than typed beside "
+                + "them. All three sites -- both ramp vertices and the zero-protection fallback -- pass the same "
+                + "authored slope, because two of them computing one shoulder edge from different slopes would put a "
+                + "seam in the mesh wherever the height history happened to be silent."));
 
             r.Add(new LegacyMathRow(f, "adjacent-road separation thresholds",
                 "how close another carriageway must be before the two are treated as one surface",
@@ -644,20 +653,34 @@ namespace RoadCityMaster
 
             r.Add(new LegacyMathRow("Scripts/Road.cs", "serialised design defaults",
                 "the values a newly created road starts with",
-                new string[] { "3.25f", "0.08f", "0.61f", "0.35f", "0.1f", "0.375f" },
+                new string[] { "3.25f", "1.2f", "0.08f", "0.61f", "0.35f", "0.1f", "0.375f", "0.04f" },
                 MathRole.Geometry, MathDisposition.Sourced,
-                "laneWidth 3.25 m, maxGrade 0.08, the K-rail base 0.61 m, desiredRampHeight 0.35 m, "
-                + "matchTerrainSubtraction 0.1 m, and RoadIntersection's gradeMod 0.375. The first three each cite a "
-                + "figure from outside the tool; the last three are the author's to set.",
+                "laneWidth 3.25 m, shoulderWidth 1.2 m, maxGrade 0.08, the K-rail base 0.61 m, desiredRampHeight "
+                + "0.35 m, matchTerrainSubtraction 0.1 m, RoadIntersection's gradeMod 0.375, and shoulderCrossSlope "
+                + "0.04. The first four each cite a figure from outside the tool; the next three are the author's to "
+                + "set; the last cites one too.",
                 "3.25 m is the UrbanTwoLane row of City.RoadClassDefaults, cited there, and UrbanTwoLane is the class "
                 + "every road is born declaring itself to be. RM-109 put it here in place of a 5 m initialiser: no "
                 + "travel lane is 5 m wide, and a road that disagreed with its own class had the disagreement read as "
                 + "an authored override by the preserving merge, so the 5 m survived every later class change and the "
-                + "road could not be talked out of it. 8% is inside AASHTO's 6-12% grade band for the terrain and "
+                + "road could not be talked out of it. 1.2 m is the shoulder from that same UrbanTwoLane row, and it is "
+                + "here for exactly the same reason RM-110 (B-10) put it there: AASHTO's rural collector and local "
+                + "shoulders run 0.6-2.4 m as an edge strip, while a REFUGE is 3.0 m -- the 2.44 m design vehicle plus "
+                + "a margin at each edge -- so an urban strip belongs at the bottom of the strip band and nowhere near "
+                + "the lane width, because a shoulder near lane width is driven as a lane. The 1 m it replaced was not "
+                + "a cited figure and left a brand-new road disagreeing with its own class in the same way the 5 m lane "
+                + "did. 8% is inside AASHTO's 6-12% grade band for the terrain and "
                 + "design speeds this tool targets, and 0.61 m is the AASHTO Roadside Design Guide F-shape concrete "
                 + "barrier base width, already cited at its site in Road.cs. The remaining three are author-editable "
                 + "defaults whose homes are the field census and the inspector registry, not a design standard -- "
-                + "gradeMod is a slider the intersection editor exposes over 0.01-2.",
+                + "gradeMod is a slider the intersection editor exposes over 0.01-2. RM-110 (B-9) added "
+                + "shoulderCrossSlope 0.04, which is CarriagewaySection.ShoulderCrossSlopeNormal -- AASHTO's normal "
+                + "cross-slope for a paved bituminous shoulder, inside the same 2%-6% band the field is clamped into. "
+                + "It is written as a literal here and not as a reference to that constant for one reason: a field "
+                + "initialiser that reads a const is still a copy, and a road serialised before this field existed "
+                + "arrives with 0 rather than with any initialiser at all -- so the value that actually protects an old "
+                + "road is the clamp's fallback, which IS the constant, and this initialiser only decides what a "
+                + "brand-new road starts at.",
                 null));
 
             r.Add(new LegacyMathRow("Scripts/Construction2DRect.cs and Scripts/Construction3DTri.cs",

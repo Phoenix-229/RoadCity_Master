@@ -91,9 +91,9 @@ namespace RoadCityMaster.City
 
             for (int i = 0; i < spline.TunnelParams.Count; i++)
             {
-                KeyValuePair<float, float> pair = spline.TunnelParams[i];
-                float t0 = pair.Key;
-                float t1 = pair.Value;
+                SplineSpan pair = spline.TunnelParams[i];
+                float t0 = pair.start;
+                float t1 = pair.end;
                 if (t1 <= t0) { continue; }
 
                 SplineTunnelRun entry = new SplineTunnelRun();

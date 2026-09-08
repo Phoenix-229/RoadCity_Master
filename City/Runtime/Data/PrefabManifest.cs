@@ -235,6 +235,13 @@ namespace RoadCityMaster.City
                 Need.PartLength, Scope.InScope));
             m.Add(Cat(sDrain, "Outfall", V("headwall", "scour protection", "energy dissipator"), "RM-30",
                 Need.None, Scope.InScope));
+            // B-15. Urban drainage is not only pipes and ditches: a settlement sheds its rain into detention basins,
+            // swales and rain gardens, and those are visible ground features an author walks past. Kept out of
+            // "Ditch lining" because a lined ditch conveys and these STORE -- a basin has a footprint and a top water
+            // level, a ditch has a profile and a fall.
+            m.Add(Cat(sDrain, "Detention and infiltration",
+                V("basin edge", "swale profile", "rain garden", "headwall", "flow control chamber"), "RM-30",
+                Need.FootprintSizeAndShape | Need.PartLength, Scope.InScope));
 
             // Traffic control and signage -- consumed by RM-32, RM-43, junctions.
             const string sTraffic = "Traffic control and signage";
@@ -302,10 +309,19 @@ namespace RoadCityMaster.City
                 Need.FootprintSizeAndShape, Scope.InScope));
             m.Add(Cat(sWater, "Pump / lift station", V("building", "pipework", "cabinet"), "§ 10.12",
                 Need.FootprintSizeAndShape, Scope.InScope));
-            m.Add(Cat(sWater, "Street water plant", V("hydrant", "valve box", "standpipe", "water point"),
-                "§ 10.12", Need.None, Scope.InScope));
+            // B-15. The firefighting fittings a real street carries ride on THIS row rather than a category of their
+            // own, because the hydrant was already here: a second "fire hydrant" category would be the duplicate the
+            // manifest exists to prevent. What was missing were the fittings beside it.
+            m.Add(Cat(sWater, "Street water plant",
+                V("hydrant", "valve box", "standpipe", "water point", "hydrant marker plate", "dry riser inlet",
+                    "hose reel cabinet"), "§ 10.12", Need.None, Scope.InScope));
             m.Add(Cat(sWater, "Sewer plant", V("manhole", "vent column", "chamber"), "§ 10.12", Need.None,
                 Scope.InScope));
+            // B-15. Gas was named in this section's heading and had no row. A governor compound, a valve box, a marker
+            // post over a main and a service riser up a wall are all street-visible.
+            m.Add(Cat(sWater, "Gas street plant",
+                V("district governor", "valve box", "marker post", "service riser", "meter cabinet"), "§ 10.12",
+                Need.None, Scope.InScope));
             // Bridges -- consumed by RM-33, RM-35, RM-59.
             const string sBridge = "Bridges";
             m.Add(Cat(sBridge, "Girder / beam bridge",
@@ -400,6 +416,12 @@ namespace RoadCityMaster.City
                 Need.FrontageSideAndOffset, Scope.InScope));
             m.Add(Cat(sHub, "Industry", V("shed", "silo", "tank", "conveyor", "stack", "yard fence", "gate"),
                 "RM-43", Need.FootprintSizeAndShape, Scope.InScope));
+            // B-15. A coastal or lakeside settlement that is not a cargo port still has a waterfront, and "Port" above
+            // is the industrial one -- ship-to-shore cranes and container stacks. Small craft are a different place
+            // entirely, and one of the settlement archetypes the author asked for.
+            m.Add(Cat(sHub, "Marina and small craft harbour",
+                V("pontoon", "finger berth", "boat ramp", "mast crane", "fuel point", "mooring pile",
+                    "harbour office"), "RM-43", Need.FootprintSizeAndShape, Scope.InScope));
             // Streetscape and public space -- consumed by RM-47, RM-24, RM-42.
             const string sStreet = "Streetscape and public space";
             m.Add(Cat(sStreet, "Seating and waste", V("bench", "seat", "litter bin", "recycling set"), "RM-47",
@@ -420,6 +442,30 @@ namespace RoadCityMaster.City
             m.Add(Cat(sStreet, "Utility street plant",
                 V("telecom cabinet", "transformer kiosk", "post box", "public toilet", "water point"), "RM-24",
                 Need.FrontageSideAndOffset, Scope.InScope));
+            // B-15. Four rows the author did not name and a real street cannot do without.
+            //
+            // "Building attachment" is the largest single realism lever in this table: the difference between a row of
+            // clean extruded blocks and a street someone lives on is air-conditioning units, satellite dishes, roof
+            // tanks, conduit and a laundry line. It is filed under streetscape, not under buildings, because it is
+            // placed ON a facade after the building stands, by the same frontage rule as an awning.
+            m.Add(Cat(sStreet, "Building attachment",
+                V("air-conditioning unit", "satellite dish", "roof water tank", "aerial", "conduit run",
+                    "external stair", "laundry line", "shopfront sign", "roller shutter", "canopy"), "RM-42",
+                Need.FrontageSideAndOffset, Scope.InScope));
+            // A city is always partly under repair. Without this the streets read as finished the day they were built.
+            m.Add(Cat(sStreet, "Temporary works",
+                V("cone set", "barrier run", "sign stand", "road plate", "scaffold bay", "hoarding run", "skip"),
+                "RM-42", Need.PartLength, Scope.InScope));
+            // Distinct from the litter bin in "Seating and waste": that is street furniture for a passer-by, this is
+            // the communal enclosure a block of flats or a parade of shops puts its waste in.
+            m.Add(Cat(sStreet, "Waste point",
+                V("communal bin store", "bring bank", "skip stand", "bin corral", "trade waste enclosure"), "RM-47",
+                Need.FootprintSizeAndShape, Scope.InScope));
+            // Distinct from "Street name sign" (which is addressed at a driver) and from a notice board: a finger post
+            // or a map totem exists for someone on foot deciding which way to walk.
+            m.Add(Cat(sStreet, "Pedestrian wayfinding",
+                V("finger post", "map board", "totem", "street map panel", "direction plate"), "RM-42", Need.None,
+                Scope.InScope));
             // Buildings by zone -- consumed by RM-42, RM-22, RM-55.
             const string sBuild = "Buildings by zone";
             Need buildBase = Need.FootprintSizeAndShape | Need.FrontageSideAndOffset;
@@ -445,6 +491,25 @@ namespace RoadCityMaster.City
             m.Add(Cat(sBuild, "Ancillary",
                 V("garage", "outbuilding", "water tank stand", "boundary gate", "stairs", "veranda"), "RM-42",
                 Need.FootprintSizeAndShape, Scope.InScope));
+            // B-15. Three building kinds the zone rows above cannot stand in for.
+            //
+            // "Office and civic" carries a school, a clinic and a hall, which covers the everyday civic building; it
+            // does not cover the ones that give a town its centre and a city its skyline. A library, a museum, a fire
+            // station and a post office are each a recognisable building with its own frontage habits, and a settlement
+            // without them reads as a housing estate rather than a place.
+            m.Add(Cat(sBuild, "Community and culture",
+                V("library", "museum", "community centre", "sports hall", "fire station", "ambulance station",
+                    "post office", "university block"), "RM-42", buildBase, Scope.InScope));
+            // A stadium is not a large office: it is a single footprint with a bowl, and it is what an author places to
+            // say "this is the big city".
+            m.Add(Cat(sBuild, "Stadium and arena",
+                V("stand", "roof bay", "floodlight mast", "turnstile block", "ticket office"), "RM-42", buildBase,
+                Scope.InScope));
+            // The surface car park in the new movement section below is markings on the ground; this is the structure.
+            // Both exist in every real city centre and neither substitutes for the other.
+            m.Add(Cat(sBuild, "Multi-storey car park",
+                V("deck structure", "ramp run", "stair core", "barrier line", "pay station"), "RM-42", buildBase,
+                Scope.InScope));
             // Vegetation -- consumed by RM-47, RM-48, RM-60.
             const string sVeg = "Vegetation";
             m.Add(Cat(sVeg, "Street tree", V("young", "mature"), "RM-47", Need.None, Scope.InScope));
@@ -454,6 +519,92 @@ namespace RoadCityMaster.City
                 Need.None, Scope.InScope));
             m.Add(Cat(sVeg, "Site vegetation", V("boundary tree line", "windbreak row", "orchard row"), "RM-47",
                 Need.None, Scope.InScope));
+
+            // Parks and open space -- consumed by RM-47, RM-22, and B-15's settlement character pass.
+            //
+            // B-15, and the author's own example: "a pavement for people walking in a park". That is NOT the "Footway
+            // surface" row in Kerbs, footways and crossings -- that row is the kerbside footway of a street, quantised
+            // to kerb lengths and tied to a carriageway edge. A park path has no kerb, no carriageway and no building
+            // line; it wanders, it forks, and its surface is often bound gravel rather than paving. Every row here is a
+            // MAN-MADE object, which is what this tool places; the trees, flowers and grass that go between them stay
+            // the author's own prefabs, dropped into the placement slots and pulled to the ground (C-17).
+            const string sPark = "Parks and open space";
+            m.Add(Cat(sPark, "Park path",
+                V("bound gravel run", "paved run", "boardwalk run", "stepping-stone crossing", "path edging",
+                    "junction node"), "RM-47", Need.PartLength, Scope.InScope));
+            m.Add(Cat(sPark, "Park entrance",
+                V("gate", "arch", "sign", "bollard line", "cycle barrier", "kissing gate"), "RM-47", Need.None,
+                Scope.InScope));
+            m.Add(Cat(sPark, "Playground",
+                V("toddler set", "junior set", "swing frame", "climbing frame", "safety surface", "boundary fence"),
+                "RM-47", Need.FootprintSizeAndShape, Scope.InScope));
+            m.Add(Cat(sPark, "Outdoor fitness",
+                V("calisthenics rig", "machine set", "trail marker post", "rubber mat"), "RM-47", Need.None,
+                Scope.InScope));
+            m.Add(Cat(sPark, "Sports pitch and court",
+                V("pitch markings", "goal", "court fence", "net post", "floodlight mast", "dugout"), "RM-47",
+                Need.FootprintSizeAndShape, Scope.InScope));
+            m.Add(Cat(sPark, "Park shelter and pavilion",
+                V("bandstand", "gazebo", "picnic shelter", "changing pavilion", "kiosk"), "RM-47",
+                Need.FootprintSizeAndShape, Scope.InScope));
+            m.Add(Cat(sPark, "Picnic and barbecue", V("table set", "bench group", "barbecue stand", "bin"),
+                "RM-47", Need.None, Scope.InScope));
+            m.Add(Cat(sPark, "Park water feature",
+                V("pond edge", "basin", "jet set", "cascade", "duckboard", "stepping stones"), "RM-47",
+                Need.PartLength, Scope.InScope));
+            m.Add(Cat(sPark, "Park maintenance", V("store", "compound gate", "hose point", "notice sign"),
+                "RM-47", Need.FootprintSizeAndShape, Scope.InScope));
+            m.Add(Cat(sPark, "Open-space edge",
+                V("railing run", "hedge run", "ha-ha", "edging kerb", "bollard line"), "RM-47", Need.PartLength,
+                Scope.InScope));
+            m.Add(Cat(sPark, "Cemetery and memorial ground",
+                V("boundary wall", "gate", "grave row", "chapel", "path run", "memorial"), "RM-47",
+                Need.FootprintSizeAndShape, Scope.InScope));
+
+            // Squares, promenades and pedestrian realm -- consumed by RM-47, RM-46, and B-15's archetypes.
+            //
+            // B-15. The public rooms of a settlement. A square is not a wide footway: it has no direction of travel, it
+            // is bounded by frontages rather than by kerbs, and it is where a town puts its market, its monument and its
+            // steps. The water's-edge and beach rows are what the port, beach and lakeside archetypes stand on -- the
+            // zone catalogue already carries the shoreline setback that keeps them off the waterline itself.
+            const string sSquare = "Squares, promenades and pedestrian realm";
+            m.Add(Cat(sSquare, "Public square paving",
+                V("paving set", "banding", "tree pit", "step run", "edge seating"), "RM-47",
+                Need.FootprintSizeAndShape, Scope.InScope));
+            m.Add(Cat(sSquare, "Pedestrian street",
+                V("shared-surface run", "bollard line", "delivery bay", "planter row"), "RM-47", Need.PartLength,
+                Scope.InScope));
+            m.Add(Cat(sSquare, "Covered walkway",
+                V("arcade bay", "colonnade bay", "canopy run", "awning run"), "RM-47",
+                Need.PartLength | Need.FrontageSideAndOffset, Scope.InScope));
+            m.Add(Cat(sSquare, "Water's-edge public realm",
+                V("promenade rail", "steps to water", "slipway", "jetty", "mooring ring"), "RM-46",
+                Need.PartLength, Scope.InScope));
+            m.Add(Cat(sSquare, "Beach realm",
+                V("boardwalk run", "lifeguard tower", "beach shower", "changing hut", "litter point"), "RM-46",
+                Need.None, Scope.InScope));
+            // The author's own request, alongside the bench and the bus stop: somewhere to stop and rest. A layby with
+            // seating and shade is a roadside place, which is why it is here and not in road furniture -- furniture is
+            // what protects and directs traffic, this is what serves a person who has got out of the vehicle.
+            m.Add(Cat(sSquare, "Resting area",
+                V("layby seating", "shade structure", "table", "bin", "information post"), "RM-47",
+                Need.FootprintSizeAndShape, Scope.InScope));
+
+            // Off-carriageway movement and parking -- consumed by RM-29, RM-31, RM-22.
+            //
+            // B-15. Ways of moving through a settlement that are not the carriageway and not the kerbside footway. A
+            // cycle track has its own surface, its own separator and its own signal head; a pedestrian underpass is not
+            // a road tunnel (no carriageway, ramps instead of grades, and it is lit for someone walking).
+            const string sMove = "Off-carriageway movement and parking";
+            m.Add(Cat(sMove, "Cycle track",
+                V("surface run", "separator", "side-road treatment", "cycle signal", "crossing markings"), "RM-29",
+                Need.PartLength, Scope.InScope));
+            m.Add(Cat(sMove, "Pedestrian underpass",
+                V("portal", "ramp run", "stair run", "handrail", "luminaire"), "RM-31", Need.PartLength,
+                Scope.InScope));
+            m.Add(Cat(sMove, "Surface car park",
+                V("bay set", "aisle markings", "wheel stop", "pay machine", "shade canopy"), "RM-22",
+                Need.FootprintSizeAndShape, Scope.InScope));
 
             // Site works and pads -- consumed by RM-22, lot frontages.
             const string sSite = "Site works and pads";
@@ -466,6 +617,16 @@ namespace RoadCityMaster.City
                 V("parking bay set", "yard surface", "forecourt surface", "marking set"), "RM-22", Need.None,
                 Scope.InScope));
             m.Add(Cat(sSite, "Compound", V("fence run", "gate", "guard booth", "lighting"), "RM-22",
+                Need.FootprintSizeAndShape, Scope.InScope));
+            // B-15. A village is not a small city, and this is most of the difference. Without a farmstead row the
+            // lowest order of settlement is drawn with the same kit as a suburb.
+            m.Add(Cat(sSite, "Rural yard and farmstead",
+                V("grain store", "livestock pen", "hay stack", "threshing floor", "farm gate", "water trough"),
+                "RM-22", Need.FootprintSizeAndShape, Scope.InScope));
+            // Distinct from the "market hall" building and the single "market stall": this is the GROUND a periodic
+            // market stands on, which is a surface plus a service edge and is empty six days a week.
+            m.Add(Cat(sSite, "Market ground",
+                V("stall row set", "canopy run", "wash point", "waste point", "weigh table"), "RM-22",
                 Need.FootprintSizeAndShape, Scope.InScope));
 
             return m;

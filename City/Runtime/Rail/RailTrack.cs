@@ -45,6 +45,25 @@ namespace RoadCityMaster.City
         /// <summary> AUTHORED design speed for the line, km/h. Drives the equilibrium cant a curve wants. </summary>
         public float designSpeedKmh = 120f;
 
+        /// <summary> AUTHORED maximum rate of change of applied cant, mm/s: how fast the outer rail may rise UNDER A
+        /// TRAIN as it runs through a transition. 55 mm/s is the common permissible maximum for conventional stock,
+        /// 35 mm/s the desirable value. It is one of the three rules that decide how long a transition curve has to
+        /// be, and it is the one that ties that length to the SPEED. </summary>
+        public float maxCantRateMillimetresPerSecond = 55f;
+
+        /// <summary> AUTHORED maximum rate of change of cant DEFICIENCY, mm/s -- the same limit applied to the part of
+        /// the curve's demand the cant does not answer, which is the part the passenger feels sideways. Also 55 mm/s
+        /// in common practice. Kept separate from the cant rate because a curve can be short of cant without being
+        /// short of cant RATE, and the two limits then ask for different transition lengths. </summary>
+        public float maxCantDeficiencyRateMillimetresPerSecond = 55f;
+
+        /// <summary> AUTHORED maximum cant GRADIENT, mm of cant per metre of track: how steeply the outer rail may
+        /// climb ALONG the track. That is a twist limit on the track itself rather than a comfort limit on the
+        /// passenger, which is why it is a third figure and not a restatement of the other two. 2.5 mm/m is 1 in 400,
+        /// the usual permissible maximum, against 1 in 600 desirable. It is the rule that still bites at low speed,
+        /// where both rate limits go slack. </summary>
+        public float maxCantGradientMillimetresPerMetre = 2.5f;
+
         public static RailTrackClass Default()
         {
             return new RailTrackClass();
@@ -68,10 +87,13 @@ namespace RoadCityMaster.City
     /// as much as the geometry: a curve tighter than the minimum radius must REFUSE and name the radius it needed,
     /// because a kinked rail is the kind of error that survives all the way to a screenshot.
     ///
-    /// SCOPE (stated, not deferred): this covers plain track and station placement only. A rail junction is a
-    /// TURNOUT -- switch rails, a frog and a diverging route at a standardised angle -- which is not a road
-    /// intersection and cannot come from the corner-blending <c>ThreeWay</c>/<c>FourWay</c> code; turnouts and
-    /// level crossings are explicitly OUT of scope here and are their own task with their own geometry spec. </summary>
+    /// SCOPE (stated, not deferred): this file is the constraint SET only -- the cant, radius and gradient rules a
+    /// piece of plain track is judged by. Where those rules meet the world is <see cref="RailAlignmentPlanner"/>. A
+    /// rail junction is a TURNOUT -- switch rails, a frog and a diverging route at a standardised angle -- which is
+    /// not a road intersection and cannot come from the corner-blending <c>ThreeWay</c>/<c>FourWay</c> code, so
+    /// turnouts stay explicitly OUT of scope, their own task with their own geometry spec. LEVEL CROSSINGS are no
+    /// longer among them: <see cref="RailAlignmentPlanner"/> owns them, because a crossing is where a staked rail
+    /// and a staked road meet, and only something holding both alignments can find one. </summary>
     public static class RailTrack
     {
         /// <summary> The equilibrium (balancing) cant in mm for a curve of the given radius at the given speed:
@@ -146,6 +168,61 @@ namespace RoadCityMaster.City
         public static bool MeetsCantDeficiency(double speedKmh, double radiusMetres, RailTrackClass cls)
         {
             return CantDeficiencyMillimetres(speedKmh, radiusMetres, cls) <= cls.maxCantDeficiencyMillimetres;
+        }
+
+        /// <summary> The speed a curve of this radius can actually be run at, km/h, from the same cant equation read
+        /// backwards: with the outer rail raised as far as the class allows and the deficiency taken to its limit,
+        /// E + Ed = (G . V^2)/(127 . R) gives V = sqrt((E + Ed) . 127 . R / G).
+        ///
+        /// This exists so a tight curve has an answer other than "no". <see cref="CheckRadius"/> refuses a radius
+        /// below the class minimum because such a curve cannot be built as track at all; a curve that is above the
+        /// minimum but still too tight for the design speed is a different thing entirely -- it is buildable, it is
+        /// everywhere in the real world, and what it needs is a SPEED RESTRICTION. Reporting the restriction is the
+        /// difference between a tool that says a route is impossible and a tool that says the route is 95 km/h.
+        ///
+        /// A straight (non-positive or infinite radius) returns positive infinity: it imposes no limit of its own, and
+        /// returning the design speed instead would make a caller taking the minimum of the two unable to tell a
+        /// straight from a curve that happens to be fast enough. </summary>
+        public static double PermissibleSpeedKmh(double radiusMetres, RailTrackClass cls)
+        {
+            if (cls == null) { return double.PositiveInfinity; }
+            if (radiusMetres <= 0.0 || double.IsInfinity(radiusMetres)) { return double.PositiveInfinity; }
+            double gauge = cls.cantFormulaGaugeMillimetres > 0f ? cls.cantFormulaGaugeMillimetres : 1500.0;
+            double budget = cls.maxAppliedCantMillimetres + cls.maxCantDeficiencyMillimetres;
+            if (budget <= 0.0) { return 0.0; }
+            return Math.Sqrt(budget * 127.0 * radiusMetres / gauge);
+        }
+
+        /// <summary> How long the transition into a curve of this radius has to be, in metres: the LONGEST of the three
+        /// rules rail practice applies, because each of them is a different thing going wrong and satisfying one does
+        /// not excuse the others.
+        ///
+        /// * rate of change of applied cant: Ls = E . V / (3.6 . rc), the outer rail rising under a moving train;
+        /// * rate of change of cant deficiency: Ls = Ed . V / (3.6 . rd), the sideways force building on a passenger;
+        /// * cant gradient: Ls = E / ig, the twist the track itself is allowed along its length.
+        ///
+        /// The 3.6 is the km/h to m/s conversion, so E/rc is a time in seconds and V/3.6 turns it into a length. A
+        /// straight wants no transition and returns zero, which is the same answer the road side gives and for the same
+        /// reason: there is nothing to ease into. </summary>
+        public static double TransitionLengthMetres(double speedKmh, double radiusMetres, RailTrackClass cls)
+        {
+            if (cls == null || radiusMetres <= 0.0 || double.IsInfinity(radiusMetres)) { return 0.0; }
+            double applied = AppliedCantMillimetres(speedKmh, radiusMetres, cls);
+            double deficiency = CantDeficiencyMillimetres(speedKmh, radiusMetres, cls);
+
+            double cantRate = cls.maxCantRateMillimetresPerSecond > 0f
+                ? cls.maxCantRateMillimetresPerSecond : 55.0;
+            double deficiencyRate = cls.maxCantDeficiencyRateMillimetresPerSecond > 0f
+                ? cls.maxCantDeficiencyRateMillimetresPerSecond : 55.0;
+            double cantGradient = cls.maxCantGradientMillimetresPerMetre > 0f
+                ? cls.maxCantGradientMillimetresPerMetre : 2.5;
+
+            double byCantRate = applied * speedKmh / (3.6 * cantRate);
+            double byDeficiencyRate = deficiency * speedKmh / (3.6 * deficiencyRate);
+            double byCantGradient = applied / cantGradient;
+
+            double longest = byCantRate > byDeficiencyRate ? byCantRate : byDeficiencyRate;
+            return longest > byCantGradient ? longest : byCantGradient;
         }
     }
 }

@@ -71,7 +71,7 @@ namespace RoadCityMaster
             return failures.Count == 0;
         }
 
-        /// <summary> Every field with a measured unit (m, °, km/h, %, frac, ×) renders a non-empty unit token, so no
+        /// <summary> Every field with a measured unit (m, °, km/h, %, fraction, ×) renders a non-empty unit token, so no
         /// numeric label ships bare. Counts/indices/refs are exempt by design. </summary>
         private static void CaseNumericFieldsHaveUnits(StringBuilder builder, List<string> failures)
         {

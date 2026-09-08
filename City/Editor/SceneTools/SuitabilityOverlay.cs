@@ -143,10 +143,20 @@ namespace RoadCityMaster.City.Editor
         // `SetDisplay(SuitabilityDisplay.X)` with a [MenuItem] on it and no other caller, and the whole submenu was
         // unreachable in the sense that matters: this overlay draws NOTHING until something calls SetMap, and no menu
         // row can call it, so an author who found "Show the suitability overlay" got an empty scene view and no
-        // explanation. The controls live in the RoadSystem inspector now, in a section that only appears once Map is
-        // non-null -- i.e. once there is a solved surface to look at -- and the six modes are one enum popup rather than
-        // six commands, because they are one choice. Show(), Hide(), SetDisplay(), IsShown and Display are the API that
-        // section drives; nothing about the drawing changed.
+        // explanation.
+        //
+        // B-22 is the correction. The sentence that stood here said the controls "live in the RoadSystem inspector
+        // now"; they did not, because RM-108 deleted the rows and described the replacement instead of writing it, so
+        // for the whole interval between the two tasks Show(), Hide() and SetDisplay() had no caller anywhere in the
+        // tool. They have one now: the RoadSystem inspector draws a "Corridor" section with a show/hide toggle over
+        // IsShown, one popup over SuitabilityDisplay -- the ten rows really do collapse to one control, because the
+        // overlay draws exactly one mode at a time -- and CursorLine as a read-out. Each popup row is worded by
+        // DisplayName below, so the six sentences are not spelled a second time in the inspector.
+        //
+        // The precondition is honest rather than cautious: that section is drawn only while Map is non-null, because
+        // the paragraph above is still true and a control that switches on a tool drawing nothing is the same defect
+        // as the menu row was. And it is still true that nothing calls SetMap -- the bake computes the raster, no code
+        // hands it here. That missing feed is B-28, not this file. The drawing is unchanged by either task.
 
         /// <summary> The 0..1 quantity a cell contributes to the current display, or a negative number when this cell
         /// has nothing to show in this mode (an off-corridor cell in corridor mode, say) and should not be drawn at all.

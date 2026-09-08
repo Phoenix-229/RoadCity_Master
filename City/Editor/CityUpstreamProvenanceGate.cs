@@ -37,9 +37,11 @@ namespace RoadCityMaster.City.Editor
     /// -- which is precisely why it is tested synthetically. "We rewrote it" has to be a diff, not a recollection.
     ///
     /// And case 9 is the part worth reading twice. RM-64 built its author-facing inspector list by asking a different
-    /// question -- does a user of this tool ever see this inspector -- and arrived at fourteen files. RM-106 built
-    /// its vendored editor set from the download. The two sets are identical. Neither was derived from the other, so
-    /// each is a check on the other, and if a future task moves a file into one it will be told about the other.
+    /// question -- does a user of this tool ever see this inspector. RM-106 built its vendored editor set from the
+    /// download. The two sets were identical, neither derived from the other, so each is a check on the other, and if a
+    /// future task moves a file into one it will be told about the other. B-11 is the first task to have been told: it
+    /// added an author-facing editor file this project WROTE, so the checklist now names its own additions and case 9
+    /// subtracts them, holding every other file to the identity.
     ///
     /// Report lines are prefixed RCMPROV. </summary>
     public static class CityUpstreamProvenanceGate
@@ -338,10 +340,18 @@ namespace RoadCityMaster.City.Editor
             Line(sb, "header stamp", "vendored to MIT, new work to proprietary, both by provenance");
         }
         /// <summary> Case 9: two independent answers to the same question have to agree. RM-64 listed the editor files
-        /// an author actually sees, by asking whether a user of this tool ever opens that inspector, and got fourteen.
-        /// RM-106 listed the editor files that came in the download. The sets are identical. Neither was derived from
-        /// the other, so each is a check on the other -- and a future task that moves a file into one of them gets told
-        /// about the other instead of silently disagreeing with it. </summary>
+        /// an author actually sees, by asking whether a user of this tool ever opens that inspector. RM-106 listed the
+        /// editor files that came in the download. Neither was derived from the other, so each is a check on the other --
+        /// and a future task that moves a file into one of them gets told about the other instead of silently disagreeing
+        /// with it.
+        ///
+        /// The sets were identical when RM-106 wrote them and are no longer, because B-11 added an author-facing editor
+        /// file this project wrote: a panel on Unity's own GameObject header, for generated objects that carry no
+        /// component of ours. That is a real difference, not drift, so the checklist names its own additions in
+        /// InspectorConsistencyChecklist.NewWorkAuthorFacing() and this case subtracts them before comparing. Every other
+        /// file is still held to the identity, which is what keeps the corroboration worth having -- the alternative,
+        /// filing our own author-facing file as tooling to keep the counts level, would have bought a green gate by
+        /// recording something untrue. </summary>
         private static void CaseRm64AgreesAboutTheEditorFiles(List<string> failures, StringBuilder sb)
         {
             List<string> sources = LicenceHeaderOperator.ToolRelativeSources();
@@ -356,30 +366,57 @@ namespace RoadCityMaster.City.Editor
                     vendorEditor[NameOf(p)] = true;
                 }
             }
+            // The checklist's own declared additions. Each is held to being genuinely ours: a name here that RM-106 says
+            // arrived in the download would be an exemption taken for a file that does not need one.
+            IList<string> newWork = InspectorConsistencyChecklist.NewWorkAuthorFacing();
+            Dictionary<string, bool> ours = new Dictionary<string, bool>(StringComparer.Ordinal);
+            List<string> claimedButVendored = new List<string>();
+            for (int i = 0; i < newWork.Count; i++)
+            {
+                ours[NameOf(newWork[i])] = true;
+                if (vendorEditor.ContainsKey(NameOf(newWork[i]))) { claimedButVendored.Add(newWork[i]); }
+            }
             IList<InspectorRecord> rows = InspectorConsistencyChecklist.Rows();
-            List<string> onlyInChecklist = new List<string>();
             Dictionary<string, bool> checklist = new Dictionary<string, bool>(StringComparer.Ordinal);
+            // A row that is neither vendored nor declared is the case the count check used to catch on its own: a file
+            // this project wrote, listed as author-facing, without anyone recording that the download did not carry it.
+            List<string> undeclaredNewWork = new List<string>();
             for (int i = 0; i < rows.Count; i++)
             {
                 checklist[rows[i].file] = true;
-                if (!vendorEditor.ContainsKey(rows[i].file)) { onlyInChecklist.Add(rows[i].file); }
+                if (vendorEditor.ContainsKey(rows[i].file)) { continue; }
+                if (ours.ContainsKey(rows[i].file)) { continue; }
+                undeclaredNewWork.Add(rows[i].file);
             }
             List<string> onlyInVendorSet = new List<string>();
             foreach (KeyValuePair<string, bool> pair in vendorEditor)
             {
                 if (!checklist.ContainsKey(pair.Key)) { onlyInVendorSet.Add(pair.Key); }
             }
-            onlyInChecklist.Sort(StringComparer.Ordinal);
+            List<string> declaredButUnlisted = new List<string>();
+            foreach (KeyValuePair<string, bool> pair in ours)
+            {
+                if (!checklist.ContainsKey(pair.Key)) { declaredButUnlisted.Add(pair.Key); }
+            }
+            undeclaredNewWork.Sort(StringComparer.Ordinal);
             onlyInVendorSet.Sort(StringComparer.Ordinal);
-            Expect(onlyInChecklist.Count == 0,
-                Fmt("RM-64 calls these editor files author-facing but RM-106 does not call them vendored: {0}",
-                    Join(onlyInChecklist)), failures);
+            declaredButUnlisted.Sort(StringComparer.Ordinal);
+            claimedButVendored.Sort(StringComparer.Ordinal);
+            Expect(undeclaredNewWork.Count == 0,
+                Fmt("RM-64 calls these editor files author-facing, RM-106 does not call them vendored, and the checklist"
+                    + " does not declare them as its own new work: {0}", Join(undeclaredNewWork)), failures);
             Expect(onlyInVendorSet.Count == 0,
                 Fmt("RM-106 calls these editor files vendored but RM-64's checklist does not list them: {0}",
                     Join(onlyInVendorSet)), failures);
-            Expect(rows.Count == vendorEditor.Count,
-                Fmt("the checklist has {0} rows and the vendored editor set has {1} files", rows.Count,
-                    vendorEditor.Count), failures);
+            Expect(declaredButUnlisted.Count == 0,
+                Fmt("the checklist declares these as its own author-facing files but carries no row for them: {0}",
+                    Join(declaredButUnlisted)), failures);
+            Expect(claimedButVendored.Count == 0,
+                Fmt("these are declared as this project's own author-facing files but RM-106 says they came in the"
+                    + " download: {0}", Join(claimedButVendored)), failures);
+            Expect(rows.Count == vendorEditor.Count + ours.Count,
+                Fmt("the checklist has {0} rows and the vendored editor set has {1} files with {2} declared as new work",
+                    rows.Count, vendorEditor.Count, ours.Count), failures);
             IList<string> excluded = InspectorConsistencyChecklist.NotAuthorFacing();
             List<string> wronglyExcluded = new List<string>();
             for (int i = 0; i < excluded.Count; i++)
@@ -389,8 +426,8 @@ namespace RoadCityMaster.City.Editor
             Expect(wronglyExcluded.Count == 0,
                 Fmt("a vendored author-facing editor file is on RM-64's excluded list: {0}", Join(wronglyExcluded)),
                 failures);
-            Line(sb, "RM-64 corroboration", Fmt("{0} vendored editor files, {1} checklist rows, {2} excluded",
-                vendorEditor.Count, rows.Count, excluded.Count));
+            Line(sb, "RM-64 corroboration", Fmt("{0} vendored editor files + {1} of our own, {2} checklist rows, {3} excluded",
+                vendorEditor.Count, ours.Count, rows.Count, excluded.Count));
         }
         /// <summary> Case 10: the written position is generated from the register, so the notice on disk and the manual
         /// cannot say something the rule does not. Docs/ is deleted when § 10 closes; this text is the thing that

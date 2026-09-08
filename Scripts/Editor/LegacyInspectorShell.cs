@@ -33,6 +33,54 @@ namespace RoadCityMaster
             if (!string.IsNullOrEmpty(subject)) { title = title + " — " + subject; }
             EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
         }
+
+
+        /// <summary> B-5, fault 1. One section boundary inside a legacy inspector: a bold title with space above it, no
+        /// trailing colon, and its explanation on the hover.
+        ///
+        /// The fault was that a section heading, a bare label ending in a colon and an RM-51 foldout all drew at the same
+        /// weight, so nothing in the inspector read as a group boundary. The fix is not a heavier heading, it is ONE
+        /// weight shared by both kinds of boundary: this draws bold, and <see cref="Group"/> draws its foldout bold
+        /// through <see cref="BoldFoldout"/>, so a heading and a foldout are the same rank wherever they meet.
+        ///
+        /// No colon, because a heading is not a prefix label. The colon on a prefix label binds it to the control on its
+        /// right; a heading has nothing on its right to bind to. </summary>
+        public static void SectionHeader(string title)
+        {
+            SectionHeader(title, null);
+        }
+
+
+        /// <summary> The same heading with the sentence an author gets on hover. Null or empty draws no tooltip, and
+        /// that is not the same as a heading nobody bothered to describe: a section whose every field carries its own
+        /// tooltip does not always need a second one on the heading above them. </summary>
+        public static void SectionHeader(string title, string tooltip)
+        {
+            GUILayout.Space(6f);
+            EditorGUILayout.LabelField(new GUIContent(title, tooltip), EditorStyles.boldLabel);
+        }
+
+
+        /// <summary> The one bold-foldout style, built once and shared by every group boundary this shell draws.
+        ///
+        /// A COPY of <c>EditorStyles.foldout</c>, never that instance itself: it belongs to the editor, so switching its
+        /// font style to bold would bold every foldout in every window Unity has open -- the same fault B-3 fixed for
+        /// word wrap. RM-99's ownership gate allows the copy for exactly that reason and skips any line that makes one.
+        ///
+        /// Null when there is no editor skin. A gate running in batchmode has none, and the getter THROWS rather than
+        /// returning null, so the probe is <see cref="InspectorTextLayout.SkinIsAvailable"/> and callers fall back to the
+        /// unstyled overload rather than to a null style. </summary>
+        private static GUIStyle boldFoldout;
+
+
+        private static GUIStyle BoldFoldout()
+        {
+            if (boldFoldout != null) { return boldFoldout; }
+            if (!InspectorTextLayout.SkinIsAvailable()) { return null; }
+            boldFoldout = new GUIStyle(EditorStyles.foldout);
+            boldFoldout.fontStyle = FontStyle.Bold;
+            return boldFoldout;
+        }
         #endregion
 
 
@@ -47,7 +95,8 @@ namespace RoadCityMaster
         public static bool Building(string owner, out bool queued, out float progress)
         {
             int ahead;
-            return Building(owner, out queued, out progress, out ahead);
+            int ticketId;
+            return Building(owner, out queued, out progress, out ahead, out ticketId);
         }
 
 
@@ -63,12 +112,19 @@ namespace RoadCityMaster
         ///
         /// An overload rather than a changed signature: the three-argument form is what the RM-102 inspector gate
         /// asserts against, and callers that only want "is it building" should not have to declare a variable for a
-        /// number they will not read. </summary>
-        public static bool Building(string owner, out bool queued, out float progress, out int ahead)
+        /// number they will not read.
+        ///
+        /// RM-110 (B-9) adds <paramref name="ticketId"/>, because a Cancel button has to name the ticket it cancels and
+        /// this is the one place that already has it in hand -- <see cref="City.BuildDispatch.Cancel(int)"/> takes an
+        /// id, and a second walk of the queue to find the same ticket again could find a different one, the queue having
+        /// moved between the two walks. It is 0 when the owner has no ticket, which is the value Cancel refuses, so a
+        /// caller that ignores the return value still cannot cancel something that was never found. </summary>
+        public static bool Building(string owner, out bool queued, out float progress, out int ahead, out int ticketId)
         {
             queued = false;
             progress = 0f;
             ahead = 0;
+            ticketId = 0;
             if (string.IsNullOrEmpty(owner)) { return false; }
 
             City.BuildDispatch.Shared.CopyTickets(tickets);
@@ -78,6 +134,7 @@ namespace RoadCityMaster
                 queued = !tickets[i].isRunning;
                 progress = tickets[i].progress;
                 ahead = i;
+                ticketId = tickets[i].id;
                 return true;
             }
             return false;
@@ -91,7 +148,8 @@ namespace RoadCityMaster
             bool queued;
             float progress;
             int ahead;
-            if (!Building(owner, out queued, out progress, out ahead)) { return false; }
+            int ticketId;
+            if (!Building(owner, out queued, out progress, out ahead, out ticketId)) { return false; }
 
             // RM-109. B-8. Three states, not two, and the third is the one that mattered: a queued ticket with nothing
             // ahead of it. The old line named a build in front of it in every queued case, which is a lie at the head of
@@ -112,9 +170,159 @@ namespace RoadCityMaster
                 text = "Queued — next to build. Editing stays enabled; changes are coalesced.";
             }
             EditorGUILayout.HelpBox(text, MessageType.Info);
+
+            // RM-110, B-9. The way out. A build an author no longer wants had no stop of any kind on it: the only
+            // recourse was to wait for a road they had already decided against, and on a long road with terrain
+            // deformation that is minutes of an editor they cannot use. BuildDispatch has carried a Cancel since RM-88
+            // and nothing in the tool had ever called it.
+            //
+            // Drawn only while there IS a ticket, because this whole line is: a Cancel button on an object that is not
+            // building is a control that does nothing, and an author who presses one and sees no change learns to
+            // distrust the ones that do work.
+            //
+            // The id comes from the same walk of the queue that produced the text above, not from a fresh one. Cancel
+            // means two different things depending on which ticket it finds -- a cooperative stop for the one that is
+            // running, removal for one still waiting -- and BuildDispatch decides which; asking again here would be a
+            // second copy of that decision, and one that could be answered about a different ticket if the queue moved
+            // between the two questions.
+            //
+            // Drawn the way every other command in this shell is drawn: a bare button at CommandButtonWidth, no layout
+            // group around it. One spelling for a command button is what makes a column of them line up.
+            if (GUILayout.Button(new GUIContent("Cancel build",
+                    "Stop this build. A build that has already started is asked to stop at its next safe point, so the "
+                    + "road is left as it was rather than half-written; one still waiting is taken out of the queue. "
+                    + "Whatever the road looked like before the build is what it looks like after."),
+                GUILayout.Width(CommandButtonWidth)))
+            {
+                City.BuildDispatch.Shared.Cancel(ticketId);
+            }
             return true;
         }
         #endregion
+
+
+        #region "Controls more than one inspector draws"
+        /// <summary> The width every command button in a legacy inspector is drawn at. B-6, fault 3 found four buttons
+        /// in one inspector at three different widths in two different styles, which reads as four unrelated things
+        /// rather than four commands. One figure, wide enough for a short sentence-case label at the editor's default
+        /// font, is the whole rule. </summary>
+        public const float CommandButtonWidth = 150f;
+
+
+        /// <summary> The branded command-button style, built once for every inspector that draws a build command.
+        ///
+        /// B-11 finishes what B-6, fault 3 started. B-6 deleted `RoadSystemEditor`'s private copy of this style; four
+        /// editors still had their own, and they were not four copies of one style -- they were three. `RoadEditor` and
+        /// `RoadIntersectionEditor` branded `Update road` and `Update intersection` with `otherbg`/`otherbg2`,
+        /// `SplineNEditor` branded `Open Wizard` with `loadbg`/`loadbgglow` and shifted its label 35 px off centre, and
+        /// `TerrainEditor` built a fourth from `FlexBG` twice over -- the same texture for rest and for hover, so it had
+        /// no hover at all -- and then never drew a single button with it. Four hand-built styles, three appearances, one
+        /// of them dead. The command that rebuilds a road and the command that rebuilds an intersection are the same kind
+        /// of act and now look like it.
+        ///
+        /// A COPY of `GUI.skin.button`, never that instance: RM-99's ownership gate allows the copy and forbids the
+        /// mutation, which is B-3's fault written down as a rule. The width is <see cref="CommandButtonWidth"/> rather
+        /// than the 128 px two of the four carried, so a branded command and a plain one line up.
+        ///
+        /// Null when there is no editor skin -- a gate in batchmode has none, and the getter THROWS rather than returning
+        /// null, so the probe is <see cref="InspectorTextLayout.SkinIsAvailable"/>. The four call sites cannot see that
+        /// null: they are inside `OnInspectorGUI`, which Unity does not call without a skin. It is returned for the case
+        /// that CAN happen -- a gate asking what the style is, headlessly, where the answer is "there isn't one yet"
+        /// rather than an exception. </summary>
+        private static GUIStyle commandButton;
+
+        public static GUIStyle CommandButtonStyle()
+        {
+            if (commandButton != null) { return commandButton; }
+            if (!InspectorTextLayout.SkinIsAvailable()) { return null; }
+
+            string basePath = RoadEditorUtility.GetBasePath();
+            Texture2D rest = null;
+            Texture2D lit = null;
+            EditorUtilities.LoadTexture(ref rest, basePath + "/Editor/Icons/otherbg.png");
+            EditorUtilities.LoadTexture(ref lit, basePath + "/Editor/Icons/otherbg2.png");
+
+            GUIStyle style = new GUIStyle(GUI.skin.button);
+            style.contentOffset = new Vector2(0f, 1f);
+            style.normal.textColor = new Color(1f, 1f, 1f, 1f);
+            style.normal.background = rest;
+            style.active.background = lit;
+            style.focused.background = lit;
+            style.hover.background = lit;
+            style.fixedHeight = 16f;
+            style.fixedWidth = CommandButtonWidth;
+
+            // Only cached once the textures actually arrived. LoadAssetFromPath can return null while the asset database
+            // is still importing on a fresh open, and caching that would leave every branded button unbranded until the
+            // next domain reload -- with nothing on screen to say why.
+            if (rest == null || lit == null) { return style; }
+            commandButton = style;
+            return commandButton;
+        }
+
+
+        /// <summary> What "save mesh assets" costs, drawn wherever that option is offered.
+        ///
+        /// B-6, fault 3. The option exists twice -- once per road and once for every road in a system -- and so did the
+        /// warning: the same sentence, character for character, in `RoadEditor` and in `RoadSystemEditor`, each drawn
+        /// through a hand-built `GUIStyle` copy of `GUI.skin.textArea` with a red tint and a background texture loaded
+        /// off disk. A sentence written twice is a sentence corrected once, and two red boxes built from two texture
+        /// loads are two more things to keep looking alike than the tool can. `HelpBox` already draws a warning the way
+        /// the rest of the editor draws one, and its icon is why the sentence no longer starts with the word WARNING.
+        /// </summary>
+        public static void SavingMeshesWarning()
+        {
+            EditorGUILayout.HelpBox("Saving meshes as assets is slow: it writes every generated mesh into the project, "
+                + "which can add minutes to a build of a whole road system. Leave it off unless the meshes have to be "
+                + "shared between scenes or kept under version control.", MessageType.Warning);
+        }
+
+
+        /// <summary> The "which camera gets flown" field, its fill-in-the-obvious-one button, and the note for when
+        /// there is no obvious one. A road flies a camera along itself; a road system flies one through a bridge. Two
+        /// features, one control, so it is drawn here rather than twice.
+        ///
+        /// B-6, fault 1. Both inspectors used to fill the field WHILE DRAWING -- `if (field == null) { SetSingle(); }`
+        /// at the top of a repaint. Selecting the object was therefore an edit: it wrote a scene reference with no undo
+        /// step behind it, dirtied the scene, and in a two-camera scene did it silently forever, because a search that
+        /// declines to guess leaves the field null and the next repaint tries again. The pick is a button now, so the
+        /// author asks for it and can undo it, and the search that declines to guess gets to SAY so.
+        ///
+        /// The value is written through the serialized property, never onto the component: that is what puts the pick in
+        /// the undo stack, and it is why this takes no owner object and calls no <c>Undo.RecordObject</c> of its own --
+        /// the caller's existing <c>ApplyModifiedProperties</c> is the commit. Writing the field directly and then
+        /// calling <c>serializedObject.Update()</c> to catch up would also throw away every other edit the caller had
+        /// pending in the same pass. </summary>
+        /// <param name="_camera"> The component's own camera property -- `Road` and `RoadSystem` each have one, for
+        /// their own feature. </param>
+        /// <param name="_pickFailed"> What this returned last repaint: whether the author has already asked for the
+        /// scene's camera and been told there isn't a single one. </param>
+        /// <returns> Whether the note should still be shown next repaint. </returns>
+        public static bool CameraField(SerializedProperty _camera, string _tooltip, bool _pickFailed)
+        {
+            if (_camera == null) { return false; }
+
+            EditorGUILayout.PropertyField(_camera, new GUIContent("Editor play camera", _tooltip));
+            if (_camera.objectReferenceValue != null) { return false; }
+
+            if (GUILayout.Button(new GUIContent("Use scene camera",
+                    "Point the field at the scene's camera. A scene with more than one camera has no obvious one to "
+                    + "fly, so nothing is picked and this says so."),
+                GUILayout.Width(CommandButtonWidth)))
+            {
+                _camera.objectReferenceValue = EngineIntegration.OnlySceneCamera();
+                _pickFailed = _camera.objectReferenceValue == null;
+            }
+
+            if (_pickFailed)
+            {
+                EditorGUILayout.HelpBox("This scene does not have exactly one camera, so there is no obvious one to "
+                    + "fly. Drag the camera to use into the field above.", MessageType.Info);
+            }
+            return _pickFailed;
+        }
+        #endregion
+
 
 
         #region "Foldouts drawn through the drawer"
@@ -136,9 +344,16 @@ namespace RoadCityMaster
         ///
         /// This exists beside <see cref="Group"/> because a legacy inspector holds two kinds of field. Most belong in
         /// the RM-51 foldouts and are drawn by group. A few are gated on a neighbouring toggle -- a shoulder width
-        /// only means something once shoulders are switched on -- and hiding them when the toggle is off is knowledge
-        /// worth keeping, so those stay at their old position, beside the toggle that governs them, and come through
-        /// here instead.
+        /// only means something once shoulders are switched on -- and keeping them next to the toggle that governs them
+        /// is knowledge worth keeping, so those stay at their old position and come through here instead.
+        ///
+        /// B-5, fault 7, changed what "gated" DRAWS as. It used to mean hidden while the toggle was off, which taught an
+        /// author that the road has no shoulder width at all rather than that the one it has is not in use, and took the
+        /// row out of the layout so everything below it jumped. It now means DISABLED, in an
+        /// <c>EditorGUI.DisabledScope</c> conditioned on the toggle: the figure stays readable, its position is stable,
+        /// and the inspector stops accepting input it would then ignore. The scope belongs to the CALLER, because only the
+        /// caller knows which toggle governs the field -- the registry describes a field's unit and range, not the switch
+        /// that makes it relevant.
         ///
         /// <paramref name="fields"/> is the inspector's own commit buffer (B-19); it is passed straight down to the
         /// drawer, which is where the rule lives. </summary>
@@ -191,7 +406,10 @@ namespace RoadCityMaster
             if (ofGroup.Count == 0) { return 0; }
 
             bool open = InspectorFoldoutState.IsOpen(componentType, group);
-            bool nowOpen = EditorGUILayout.Foldout(open, ManualReferences.GroupText(group), true);
+            GUIStyle style = BoldFoldout();
+            bool nowOpen = style == null
+                ? EditorGUILayout.Foldout(open, ManualReferences.GroupText(group), true)
+                : EditorGUILayout.Foldout(open, ManualReferences.GroupText(group), true, style);
             if (nowOpen != open) { InspectorFoldoutState.SetOpen(componentType, group, nowOpen); }
             if (!nowOpen) { return 0; }
 
@@ -257,6 +475,63 @@ namespace RoadCityMaster
             IList<FieldDescriptor> all = InspectorFieldRegistry.ForComponent(componentType);
             for (int i = 0; i < all.Count; i++) { if (all[i].field == field) { return true; } }
             return false;
+        }
+        #endregion
+
+
+        #region "Measured read-outs"
+        /// <summary> B-5, fault 4. Open the one group a COMPUTED value is allowed to appear in, and return whether it is
+        /// open.
+        ///
+        /// The policy is not restated here. What counts as a measured value, the single heading they appear under, and
+        /// that none of them is editable are <see cref="MeasuredValuePresentation"/>'s, settled by RM-64. What was
+        /// missing was anything that DREW through it: the legacy inspectors printed their computed figures as bare labels
+        /// in among the editable fields, which is why "Road width: 10.0 meters" read as a field that had stopped working.
+        /// This is that drawing surface, and it reads the policy's own constants, so a change there moves every inspector
+        /// with it rather than leaving one of them drawing measurements its own way.
+        ///
+        /// Closed by default, from <see cref="InspectorFoldoutState.IsMeasuredOpen"/>: a measurement is an answer, and an
+        /// author who wants one goes looking for it, whereas the four RM-51 groups are where they work. </summary>
+        public static bool BeginMeasured(string componentType)
+        {
+            bool open = InspectorFoldoutState.IsMeasuredOpen(componentType);
+            GUIStyle style = BoldFoldout();
+            bool nowOpen = style == null
+                ? EditorGUILayout.Foldout(open, MeasuredValuePresentation.GroupLabel, true)
+                : EditorGUILayout.Foldout(open, MeasuredValuePresentation.GroupLabel, true, style);
+            if (nowOpen != open) { InspectorFoldoutState.SetMeasuredOpen(componentType, nowOpen); }
+            if (nowOpen) { EditorGUI.indentLevel++; }
+            return nowOpen;
+        }
+
+
+        /// <summary> Close it. Takes what <see cref="BeginMeasured"/> returned rather than reading the store a second
+        /// time: the author may have clicked the foldout during this repaint, and unwinding the indent on the NEW state
+        /// instead of the drawn one leaves the whole rest of the inspector one level deep. </summary>
+        public static void EndMeasured(bool wasOpen)
+        {
+            if (wasOpen) { EditorGUI.indentLevel--; }
+        }
+
+
+        /// <summary> One computed figure: its name, the value, and the unit it is in.
+        ///
+        /// Drawn disabled, from <see cref="MeasuredValuePresentation.IsEditable"/> -- a constant precisely so a drawer
+        /// cannot pass a different answer -- and with the value in the field column rather than run on into the label, so
+        /// it lines up with the editable rows above it while reading as something the tool worked out.
+        ///
+        /// The unit is a separate argument for the same reason <see cref="InspectorFieldDrawer"/> keeps one: a caller that
+        /// concatenates "10.0" and its unit itself is how one inspector ends up spelling metres three ways. Pass null or
+        /// empty when the figure carries no unit of its own to append -- a count, or a value the model has already
+        /// formatted with its own unit inside it, as `Road.TerrainHistoryByteSize` does when it hands over "12 kb". In
+        /// the second case the unit is still spelled in exactly one place; that place is simply the model rather than
+        /// this call. </summary>
+        public static void Measured(string label, string value, string unit)
+        {
+            using (new EditorGUI.DisabledScope(!MeasuredValuePresentation.IsEditable))
+            {
+                EditorGUILayout.LabelField(label, string.IsNullOrEmpty(unit) ? value : value + " " + unit);
+            }
         }
         #endregion
 

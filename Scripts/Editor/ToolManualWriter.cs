@@ -9,13 +9,18 @@ using UnityEngine;
 
 namespace RoadCityMaster
 {
-    /// <summary> RM-65's manual, generated in the three places where a manual drifts: the field reference, the refusal
-    /// reference and the cited-standards table. Everything else in <c>Docs/Manual.md</c> is prose and is written by
-    /// hand, because prose that explains why a divided road has two carriageways cannot be generated from a register
-    /// and pretending otherwise produces a feature tour nobody reads.
+    /// <summary> RM-65's manual, generated in the four places where a manual drifts: the field reference, the refusal
+    /// reference, the cited-standards table and the menu map. Everything else in <c>Docs/Manual.md</c> is prose and is
+    /// written by hand, because prose that explains why a divided road has two carriageways cannot be generated from a
+    /// register and pretending otherwise produces a feature tour nobody reads.
     ///
-    /// Three marker pairs, one splicer: <see cref="TerrainFeatureTableWriter"/>'s <c>FindBody</c> already serves the
-    /// availability table, the provenance table and RM-64's checklist, and it serves these three too. Each splice is
+    /// The menu map is the fourth because of B-20: the manual twice stated a menu total that was wrong, and both numbers
+    /// came from counting the tree by hand. <see cref="MenuMapRegister"/> reflects over the attributes Unity itself
+    /// reads, so the count in the document is the count in the code -- including the five paths declared as a
+    /// <c>const string</c>, which no text search for the attribute would have found.
+    ///
+    /// Four marker pairs, one splicer: <see cref="TerrainFeatureTableWriter"/>'s <c>FindBody</c> already serves the
+    /// availability table, the provenance table and RM-64's checklist, and it serves these four too. Each splice is
     /// applied to the result of the previous one, in document order, because splicing shifts every offset after it.
     /// The path is built from <see cref="Application.dataPath"/>, never a literal (C-04). </summary>
     public static class ToolManualWriter
@@ -26,6 +31,9 @@ namespace RoadCityMaster
         public const string RefusalsEnd = "<!-- refusals-table:end -->";
         public const string StandardsBegin = "<!-- standards-table:begin";
         public const string StandardsEnd = "<!-- standards-table:end -->";
+        public const string MenusBegin = "<!-- menus-table:begin";
+        public const string MenusEnd = "<!-- menus-table:end -->";
+
 
         /// <summary> The manual, beside RM-49's findings, RM-50's census and RM-64's checklist. </summary>
         public static string ManualPath()
@@ -48,7 +56,8 @@ namespace RoadCityMaster
         {
             if (index == 0) { return "\n\n" + ManualReferences.FieldsTable() + "\n"; }
             if (index == 1) { return "\n\n" + ManualReferences.RefusalsTable() + "\n"; }
-            return "\n\n" + ManualReferences.StandardsTable() + "\n";
+            if (index == 2) { return "\n\n" + ManualReferences.StandardsTable() + "\n"; }
+            return "\n\n" + MenuMapRegister.MapTable() + "\n";
         }
 
         /// <summary> The begin and end marker of the pair at <paramref name="index"/>. </summary>
@@ -56,12 +65,13 @@ namespace RoadCityMaster
         {
             if (index == 0) { begin = FieldsBegin; end = FieldsEnd; return; }
             if (index == 1) { begin = RefusalsBegin; end = RefusalsEnd; return; }
-            begin = StandardsBegin; end = StandardsEnd;
+            if (index == 2) { begin = StandardsBegin; end = StandardsEnd; return; }
+            begin = MenusBegin; end = MenusEnd;
         }
 
-        public const int TableCount = 3;
+        public const int TableCount = 4;
 
-        /// <summary> Replace all three marked spans with what the registers generate. Refuses, with a reason, rather
+        /// <summary> Replace all four marked spans with what the registers generate. Refuses, with a reason, rather
         /// than rewriting a document whose markers it cannot find. Returns true when the file matched already. </summary>
         public static bool WriteInto(string path, out string message)
         {

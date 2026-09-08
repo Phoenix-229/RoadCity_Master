@@ -194,6 +194,25 @@ namespace RoadCityMaster
             // a deprecated API waiting for whoever next edited this file.
             return(GameObject.FindObjectsByType<T>());
         }
+
+
+        /// <summary> The scene's camera when it has exactly one, and null otherwise.
+        ///
+        /// B-6, fault 1. `Road` and `RoadSystem` each carried a private copy of this search -- the same four lines,
+        /// differing only in the local variable's name -- to fill a camera field of their own. Two copies of a rule
+        /// this small are still two places for it to disagree, and the rule itself is worth stating once: a scene with
+        /// two cameras has no obvious one to pick, so nothing is picked and the caller says so rather than guessing at
+        /// the author's expense. Returning the camera rather than assigning a field is what lets ONE control fill
+        /// either component's field -- the road's camera follow and the system's bridge viewer stay two features with a
+        /// field each, and `LegacyInspectorShell.CameraField` writes whichever of them it was handed. </summary>
+        public static Camera OnlySceneCamera()
+        {
+            Camera[] cameras = FindObjectsByType<Camera>();
+            if (cameras == null || cameras.Length != 1) { return null; }
+            return cameras[0];
+        }
+
+
         /// <summary> The project-relative path of the asset with this GUID, or an empty string when there is none —
         /// which is also what a player build gets, since a GUID is an editor-database concept. This is how the tool
         /// finds its own installed folder without hard-coding one (see <c>RoadEditorUtility.GetBasePath</c>). </summary>

@@ -56,12 +56,14 @@ namespace RoadCityMaster
             EditorApplication.Exit(ok ? 0 : 1);
         }
 
-        /// <summary> The shape all five writers share. A delegate rather than reflection: the compiler then checks that
+        /// <summary> The shape every writer shares. A delegate rather than reflection: the compiler then checks that
         /// each writer still exists and still takes a path and an out message. </summary>
         private delegate bool WriteDocument(string path, out string message);
 
-        /// <summary> Writes all five. Every writer is called even when an earlier one fails, because "which documents
-        /// are stale" is the question the report has to answer, and stopping at the first failure hides the rest.
+        /// <summary> Writes every register's document -- seven registers, and one of them writes two files, so the
+        /// count of documents is not the count of writers and neither number is hard-coded here. Every writer is
+        /// called even when an earlier one fails, because "which documents are stale" is the question the report has
+        /// to answer, and stopping at the first failure hides the rest.
         /// </summary>
         public static bool WriteAll(out string report)
         {
@@ -85,7 +87,7 @@ namespace RoadCityMaster
 
             // The availability table is the one register with TWO documents to keep in step -- the city layer's manual
             // and the world side's own -- and it was the one register missing from this list, which is precisely how it
-            // came to be six failures deep in drift while five other documents stayed current. The paths come from the
+            // came to be six failures deep in drift while the other documents stayed current. The paths come from the
             // writer rather than from here, so a third consumer is added there once and is written by this loop with no
             // edit on this side.
             string[] availabilityDocuments = RoadCityMaster.City.Editor.TerrainFeatureTableWriter.DocumentPaths();

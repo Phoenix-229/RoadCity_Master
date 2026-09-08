@@ -56,6 +56,7 @@ namespace RoadCityMaster.City
             c.Add(ResidentialLow());
             c.Add(ResidentialMedium());
             c.Add(CommercialCentre());
+            c.Add(Market());
             c.Add(Industrial());
             c.Add(InformalSettlement());
             c.Add(PortLogistics());
@@ -116,6 +117,26 @@ namespace RoadCityMaster.City
             z.scatterDensityLow = 0f; z.scatterDensityHigh = 0.2f;
             z.precedence = 40;
             z.shorelineSetbackMetres = 10f; z.maxSlopeDegrees = 12f;
+            return z;
+        }
+
+        private static ZoneTypeClass Market()
+        {
+            ZoneTypeClass z = new ZoneTypeClass();
+            z.zoneId = "zone.commercial.market";
+            z.planningTerm = "Market / open trading ground";
+            z.distinguishes = "A large open trading surface on the busiest street, not a taller building.";
+            z.permittedBuildingCategories = new[] { "market.ground", "market.hall", "market.stall" };
+            z.storeyMin = 1; z.storeyMax = 1;
+            z.plotSizeMinM2 = 1000f; z.plotSizeMaxM2 = 20000f;
+            z.frontSetbackMetres = 0f; z.sideSetbackMetres = 0f;
+            z.siteCoverage = 0.6f; z.plotRatio = 0.5f;
+            z.preferredStreetPattern = "grid";
+            z.streetscapeFurnitureSetId = "furniture.market";
+            z.scatterDensityLow = 0f; z.scatterDensityHigh = 0.2f;
+            z.openSurface = true; z.frontsOnBusiestStreet = true;
+            z.precedence = 42;
+            z.shorelineSetbackMetres = 10f; z.maxSlopeDegrees = 6f;
             return z;
         }
 

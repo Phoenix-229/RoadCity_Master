@@ -86,18 +86,12 @@ namespace RoadCityMaster
         }
 
 
-        /// <summary> Sets the editorPlayCamera to the first camera, if it is the only camera in this scene </summary>
-        public void EditorCameraSetSingle()
-        {
-            if (editorPlayCamera == null)
-            {
-                Camera[] editorCams = EngineIntegration.FindObjectsByType<Camera>();
-                if (editorCams != null && editorCams.Length == 1)
-                {
-                    editorPlayCamera = editorCams[0];
-                }
-            }
-        }
+        // B-6 removed EditorCameraSetSingle(). It filled `editorPlayCamera` with the scene's only camera, and its one
+        // caller was the inspector -- which called it WHILE DRAWING, so selecting this object wrote a scene reference
+        // with no undo step behind it. The pick is an author-pressed button now, in
+        // `LegacyInspectorShell.CameraField`, which writes the serialized property instead of the field so the undo
+        // stack gets it; the rule about what counts as an obvious camera is still stated once, in
+        // `EngineIntegration.OnlySceneCamera`. A setter here would only be a second way to do it without the undo step.
 
 
         /// <summary> Updates all roads of this RoadSystem: one queued build per road, so each is named in Unity's

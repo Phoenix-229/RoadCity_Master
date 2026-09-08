@@ -30,11 +30,20 @@ namespace RoadCityMaster
 
         /// <summary> Opens the manual shipped with the tool. RM-102 corrected the file name: it still pointed at the
         /// upstream project's offline manual, a file that does not exist here, so every Manual button in every
-        /// inspector opened nothing. The file is <c>RoadCityMasterManual.html</c> at the tool root, and this is the one
-        /// place that names it. </summary>
+        /// inspector opened nothing.
+        ///
+        /// B-14: it built its own path and opened it blind. Three separate ways for the seven Manual buttons -- the
+        /// most-drawn control in the tool -- to answer a click with nothing at all: the file may have been trimmed out
+        /// of the project, the tool folder may have been installed somewhere other than where CurrentDirectory plus
+        /// GetBasePath expects it, and a project path containing a space (this one is "Universe Builder") is not a
+        /// legal URI, so the raw string handed to OpenURL could be cut at the space by the shell that receives it.
+        /// <see cref="Documentation.OpenManual"/> already had all three answered -- the tool root resolved from the root
+        /// asmdef's GUID, File.Exists checked, and the path turned into an encoded file:// URI -- and warns by name
+        /// rather than throwing in each case. So this forwards to it instead of being a second, worse copy of it: one
+        /// resolver, one existence check, one message, and the file name declared in one place. </summary>
         public static void OpenOfflineManual()
         {
-            Application.OpenURL(System.Environment.CurrentDirectory.Replace(@"\", "/") + "/" + RoadEditorUtility.GetBasePath() + "/RoadCityMasterManual.html");
+            Documentation.OpenManual();
         }
 
 

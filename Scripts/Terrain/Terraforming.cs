@@ -13,6 +13,15 @@ namespace RoadCityMaster
             public float[,] heights;
             public bool[,] tHeights;
 
+            /// <summary> B-12. The heights as they were BEFORE this build touched anything -- the natural ground the
+            /// batter has to daylight against. <see cref="heights"/> cannot serve: the worker overwrites it in
+            /// place, so by the time a later segment marches outward it would be measuring itself against ground an
+            /// earlier segment already raised, and the result would depend on build order (a C-06 failure, not just
+            /// an ugly one). <see cref="oldH"/> cannot serve either -- it is a sparse insertion-ordered record of
+            /// what was overwritten, not addressable by cell. Allocated only when height modification is on, so a
+            /// road that does not deform terrain pays nothing for it, and null-checked by every reader. </summary>
+            public float[,] naturalHeights;
+
             public float HMRatio;
             public float MetersPerHM = 0f;
 
@@ -62,6 +71,7 @@ namespace RoadCityMaster
             {
                 heights = null;
                 tHeights = null;
+                naturalHeights = null;
                 cX = null;
                 cY = null;
                 cH = null;
@@ -239,6 +249,11 @@ namespace RoadCityMaster
                         TTD.TerrainSize = terrain.terrainData.size;
                         TTD.TerrainPos = terrain.transform.position;
                         TTD.tHeights = new bool[terrain.terrainData.heightmapResolution, terrain.terrainData.heightmapResolution];
+                        // B-12. Snapshot the untouched ground now, before the worker writes a single sample into
+                        // TTD.heights. This is the "natural height" TerrainFootprint.DeformedHeightMetres requires
+                        // be sampled once from unmodified terrain; taken here it is the same ground for every
+                        // segment regardless of the order they are processed in.
+                        TTD.naturalHeights = (float[,])TTD.heights.Clone();
                         TID = terrain.transform.gameObject.GetComponent<RoadTerrain>();
                         if (TID != null)
                         {
@@ -393,6 +408,15 @@ namespace RoadCityMaster
             // Both branches below need it -- the multithreaded one especially, but the immediate one reads the same
             // cached figure, and two entry points that set up differently is how the two paths quietly diverge.
             City.TerrainBuildSettings.ApplyToWorker();
+
+            // B-12's batter counter, zeroed for THIS road's terraform -- see ResetBatterHandBackCount. Here and not
+            // inside DoRects, because DoRects runs once per terrain tile and resetting there threw away every truncated
+            // batter but the last tile's. Road.ConstructRoad2 reads the total once the pass has been taken into the
+            // Terrain.
+            Threading.TerraformingThreaded.ResetBatterHandBackCount();
+
+            // B-17's refused-cut counter, on the same terms and in the same place, for the same reason.
+            Threading.TerraformingThreaded.ResetCutFloorCount();
 
             _road.SetEditorTerrainCalcs(ref EditorTTDList);
             if (_isMultithreaded)
@@ -557,6 +581,27 @@ namespace RoadCityMaster
                     //Heights:
                     if (_spline.road.isHeightModificationEnabled && TTD.heights != null && TTD.Count > 0)
                     {
+                        // B-17. The corridor is HELD as a cut region across the write. A road terraform is the one pass
+                        // that lowers ground, so it is the pass that can collide with a tunnel opening or a building pad
+                        // over the same cells; holding it puts the road in DescribeOutstanding() beside them instead of
+                        // racing them, and gives a connected provider its chance to pre-load and heal the ground.
+                        //
+                        // A refusal is reported and the write still happens. The write goes through this same gateway,
+                        // which in linked mode forwards to the provider and standalone writes directly -- so the
+                        // provider remains the arbiter of its own ground either way, and abandoning the write here
+                        // would leave a road standing on half-terraformed terrain, which is worse than an unheld write.
+                        // Standalone always grants a cut hold (see DirectTerrainSink.RequestHold), so in practice this
+                        // only ever speaks up when a provider declines.
+                        string holdRefusal;
+                        City.TerrainRequestHandle cutHold = gateway.RequestCutRegion(corridor,
+                            requester + ".cut", out holdRefusal);
+                        if (!cutHold.IsValid && !string.IsNullOrEmpty(holdRefusal))
+                        {
+                            Debug.LogWarning("Road & City Master: the ground under \"" + requester + "\" could not be"
+                                + " held open while it was cut -- " + holdRefusal + ". The cut was written anyway;"
+                                + " anything else holding this ground was not consulted.");
+                        }
+
                         //Do heights last to trigger collisions and stuff properly:
                         // RM-98: through the watertight path, not the plain one. The array the worker filled changes
                         // only the corridor cells it recorded, and stopping dead at the outermost of them leaves the
@@ -567,6 +612,10 @@ namespace RoadCityMaster
                         City.HeightSampleWindow writtenSamples = City.HeightmapRegion.WindowFromCells(
                             TTD.cX, TTD.cY, TTD.Count);
                         gateway.WriteHeightsWatertight(terrain, TTD.heights, writtenSamples, corridor, requester);
+
+                        // Released in the same iteration it was taken, so no path out of this loop can leak it --
+                        // ReleaseAll() reporting a non-zero count is how a leak would show, and it must never be this.
+                        if (cutHold.IsValid) { gateway.ReleaseCutRegion(cutHold); }
                     }
                 }
             }

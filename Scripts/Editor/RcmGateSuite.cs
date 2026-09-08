@@ -119,31 +119,25 @@ namespace RoadCityMaster
         }
 
         /// <summary> Every public static bool Run(out string) in the tool's own assemblies, except this one. Sorted by
-        /// full type name so the order never depends on assembly load order. </summary>
-        private static List<MethodInfo> Discover()
+        /// full type name so the order never depends on assembly load order.
+        ///
+        /// Public because B-20's menu map asserts that every gate discovered here carries its own menu item, and a
+        /// second discovery written to agree with this one is exactly the duplication that stops agreeing. The type walk
+        /// itself lives in <see cref="MenuMapRegister.ToolTypes"/>, so one place names the tool's two assemblies. </summary>
+        public static List<MethodInfo> Discover()
         {
             List<MethodInfo> found = new List<MethodInfo>();
-            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            for (int a = 0; a < assemblies.Length; a++)
+            List<Type> types = MenuMapRegister.ToolTypes();
+            for (int t = 0; t < types.Count; t++)
             {
-                string name = assemblies[a].GetName().Name;
-                if (name != "RoadCityMaster" && name != "RoadCityMaster.Editor") { continue; }
-
-                Type[] types;
-                try { types = assemblies[a].GetTypes(); }
-                catch (ReflectionTypeLoadException e) { types = e.Types; }
-
-                for (int t = 0; t < types.Length; t++)
-                {
-                    Type type = types[t];
-                    if (type == null || type == typeof(RcmGateSuite)) { continue; }
-                    MethodInfo m = type.GetMethod(GateMethodName, BindingFlags.Public | BindingFlags.Static,
-                        null, new Type[] { typeof(string).MakeByRefType() }, null);
-                    if (m == null || m.ReturnType != typeof(bool)) { continue; }
-                    ParameterInfo[] ps = m.GetParameters();
-                    if (ps.Length != 1 || !ps[0].IsOut) { continue; }
-                    found.Add(m);
-                }
+                Type type = types[t];
+                if (type == typeof(RcmGateSuite)) { continue; }
+                MethodInfo m = type.GetMethod(GateMethodName, BindingFlags.Public | BindingFlags.Static,
+                    null, new Type[] { typeof(string).MakeByRefType() }, null);
+                if (m == null || m.ReturnType != typeof(bool)) { continue; }
+                ParameterInfo[] ps = m.GetParameters();
+                if (ps.Length != 1 || !ps[0].IsOut) { continue; }
+                found.Add(m);
             }
 
             found.Sort(delegate (MethodInfo x, MethodInfo y)

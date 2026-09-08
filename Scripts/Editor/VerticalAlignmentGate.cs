@@ -30,7 +30,13 @@ namespace RoadCityMaster
     /// published SIMPLIFICATIONS of the relations (the 658 denominator for crests, the 120 + 3.5S for sags), and that
     /// each K round-trips back to the sight distance that produced it. A K table cannot be right in any other sense.
     ///
-    /// Report lines are prefixed RCMVERTICAL. </summary>
+    /// Report lines are prefixed RCMVERTICAL.
+    ///
+    /// B-17's four ground-frame cases live here too, and deliberately not in a file of their own. They belong with this
+    /// gate by subject -- how high the road is allowed to be, and what frame of reference that height is measured in,
+    /// are the same question asked of the profile and of the terrain under it -- and the suite is discovered by
+    /// REFLECTION over every public static Run(out string), so a new gate file would move the suite's count without
+    /// anyone changing a list, and two later entries assert what that count must be. </summary>
     public static class VerticalAlignmentGate
     {
         [MenuItem("Window/Road City Master/Testing/Vertical alignment (grades, crests, sags, sight distance)")]
@@ -67,6 +73,10 @@ namespace RoadCityMaster
             CaseTheProfileHasNoKinkAndNoReversal(builder, failures);
             CaseADraggedNodeMovesTheNumbersSmoothly(builder, failures);
             CaseOverlappingCurvesAreClippedAndSaidSo(builder, failures);
+            CaseTheGroundFloorClampsToTheTilesOwnBase(builder, failures);
+            CaseTheHeightmapConversionsAreInverses(builder, failures);
+            CaseTheFloorHonoursAnAuthoredDepth(builder, failures);
+            CaseTheCellMappingMatchesTheTerraformAndTheRefusalQuotesIt(builder, failures);
             CaseDeterministic(builder, failures);
 
             foreach (string failure in failures)
@@ -574,6 +584,178 @@ namespace RoadCityMaster
             builder.Append("RCMVERTICAL ").Append("determinism".PadRight(26))
                    .Append(a.Count).Append(" samples identical on repeat\n");
         }
+
+        // ---- B-17: the frame of reference the ground is written in ----
+
+        /// <summary> A cut cannot ask a heightmap to go below its own base plane, and the shortfall has to come back as
+        /// a number rather than being absorbed. The tile at Y = -200 is the case the old code got wrong: it clamped at
+        /// world zero, so it refused 200 m of ground the tile could actually hold. </summary>
+        private static void CaseTheGroundFloorClampsToTheTilesOwnBase(StringBuilder builder, List<string> failures)
+        {
+            float shortfall;
+
+            float granted = RoadNodeGround.ClampToGroundFloor(-150f, -200f, out shortfall);
+            Expect(Math.Abs(granted - (-150f)) < 1e-4f,
+                Fmt("cut-floor: a tile based at -200 m refused ground at -150 m (returned {0:R})", granted), failures);
+            Expect(shortfall == 0f,
+                Fmt("cut-floor: a granted cut reported a shortfall of {0:R} m", shortfall), failures);
+
+            granted = RoadNodeGround.ClampToGroundFloor(-250f, -200f, out shortfall);
+            Expect(Math.Abs(granted - (-200f)) < 1e-4f,
+                Fmt("cut-floor: a cut below the base plane was not brought back to it (returned {0:R})", granted),
+                failures);
+            Expect(Math.Abs(shortfall - 50f) < 1e-4f,
+                Fmt("cut-floor: the shortfall should be 50 m, not {0:R}", shortfall), failures);
+
+            granted = RoadNodeGround.ClampToGroundFloor(10f, 50f, out shortfall);
+            Expect(Math.Abs(granted - 50f) < 1e-4f,
+                Fmt("cut-floor: a tile based at +50 m accepted ground at +10 m (returned {0:R})", granted), failures);
+            Expect(Math.Abs(shortfall - 40f) < 1e-4f,
+                Fmt("cut-floor: the shortfall above the origin should be 40 m, not {0:R}", shortfall), failures);
+
+            granted = RoadNodeGround.ClampToGroundFloor(0f, 0f, out shortfall);
+            Expect(granted == 0f && shortfall == 0f,
+                "cut-floor: ground exactly at the base plane is not a refusal", failures);
+
+            builder.Append("RCMVERTICAL ").Append("cut-floor".PadRight(26))
+                   .Append("clamped to the tile's base at -200, 0 and +50 m\n");
+        }
+
+
+        /// <summary> World metres to a normalised heightmap sample and back. These two were not inverses: the forward
+        /// form added the tile's base and the reverse form did not, so every write on a terrain away from the origin was
+        /// displaced by the tile's own elevation. A round trip is the whole assertion. </summary>
+        private static void CaseTheHeightmapConversionsAreInverses(StringBuilder builder, List<string> failures)
+        {
+            float[] bases = new float[] { -200f, -12.5f, 0f, 340f };
+            float range = 600f;
+            int trips = 0;
+
+            for (int i = 0; i < bases.Length; i++)
+            {
+                float baseY = bases[i];
+                for (float fraction = 0f; fraction <= 1.0001f; fraction += 0.25f)
+                {
+                    float worldY = baseY + (fraction * range);
+                    float sample = RoadNodeGround.ToHeightmap01(worldY, baseY, range);
+                    float back = RoadNodeGround.FromHeightmap01(sample, baseY, range);
+                    Expect(Math.Abs(back - worldY) < 0.01f,
+                        Fmt("heightmap: {0:R} m on a tile based at {1:R} m came back as {2:R} m", worldY, baseY, back),
+                        failures);
+                    trips++;
+                }
+
+                Expect(RoadNodeGround.ToHeightmap01(baseY - 1f, baseY, range) == 0f,
+                    Fmt("heightmap: a height below the base plane did not clamp to 0 on a tile based at {0:R} m",
+                        baseY), failures);
+                Expect(RoadNodeGround.ToHeightmap01(baseY + range + 1f, baseY, range) == 1f,
+                    Fmt("heightmap: a height above the range did not clamp to 1 on a tile based at {0:R} m", baseY),
+                    failures);
+            }
+
+            Expect(RoadNodeGround.ToHeightmap01(100f, 0f, 0f) == 0f,
+                "heightmap: a zero height range must not divide", failures);
+
+            builder.Append("RCMVERTICAL ").Append("heightmap".PadRight(26))
+                   .Append(trips).Append(" round trips exact across four base planes\n");
+        }
+
+
+        /// <summary> The floor is surface + authored depth + bias, one rule and not two. At offset 0 it is the old
+        /// fill-only floor exactly; at a negative offset it sits inside the hillside, which is what makes a cutting
+        /// authorable at all. And the lift only ever raises. </summary>
+        private static void CaseTheFloorHonoursAnAuthoredDepth(StringBuilder builder, List<string> failures)
+        {
+            float surface = -37.5f;
+            float bias = RoadNodeGround.RenderBiasMetres;
+
+            Expect(Math.Abs(RoadNodeGround.FloorFromSurface(surface, 0f) - (surface + bias)) < 1e-4f,
+                "floor: at offset 0 the floor is not the surface plus the depth bias", failures);
+            Expect(Math.Abs(RoadNodeGround.FloorFromSurface(surface, -5f) - (surface - 5f + bias)) < 1e-4f,
+                "floor: a 5 m cutting did not put the floor 5 m into the surface", failures);
+            Expect(Math.Abs(RoadNodeGround.FloorFromSurface(surface, 4f) - (surface + 4f + bias)) < 1e-4f,
+                "floor: a 4 m embankment did not raise the floor by 4 m", failures);
+            Expect(float.IsNegativeInfinity(RoadNodeGround.FloorFromSurface(float.NegativeInfinity, -5f)),
+                "floor: no surface must stay no floor, whatever the offset", failures);
+
+            Vector3 below = new Vector3(10f, surface - 20f, 20f);
+            Vector3 lifted = RoadNodeGround.LiftToFloor(below, surface + bias);
+            Expect(Math.Abs(lifted.y - (surface + bias)) < 1e-4f,
+                Fmt("floor: a buried position was not raised to the floor (y = {0:R})", lifted.y), failures);
+            Expect(lifted.x == below.x && lifted.z == below.z,
+                "floor: the lift moved the position sideways", failures);
+
+            Vector3 above = new Vector3(10f, surface + 60f, 20f);
+            Expect(RoadNodeGround.LiftToFloor(above, surface + bias).y == above.y,
+                "floor: a position already clear of the floor was moved", failures);
+            Expect(RoadNodeGround.LiftToFloor(above, float.NegativeInfinity).y == above.y,
+                "floor: a position with no floor under it was moved", failures);
+
+            builder.Append("RCMVERTICAL ").Append("floor".PadRight(26))
+                   .Append("surface + depth + ").Append(bias.ToString("0.##", CultureInfo.InvariantCulture))
+                   .Append(" m bias, and the lift only raises\n");
+        }
+
+
+        /// <summary> The cell mapping has to be the terraform's own, truncating and unclamped, or the ground a road
+        /// recorded before it built cannot be read back and the floor ratchets. Asserted against the arithmetic written
+        /// out longhand, on a tile that is neither square nor at the origin -- the two conditions under which the old
+        /// crossed axis lengths were wrong. The refusal is checked to quote its shortfall, because a warning that does
+        /// not say how far short it fell cannot be acted on. </summary>
+        private static void CaseTheCellMappingMatchesTheTerraformAndTheRefusalQuotesIt(StringBuilder builder,
+            List<string> failures)
+        {
+            Vector3 basePosition = new Vector3(500f, -200f, -1500f);
+            Vector3 size = new Vector3(2000f, 600f, 1000f);
+            int resolution = 513;
+            int verified = 0;
+
+            for (float fz = 0f; fz < 0.999f; fz += 0.2f)
+            {
+                for (float fx = 0f; fx < 0.999f; fx += 0.2f)
+                {
+                    Vector3 world = new Vector3(basePosition.x + (fx * size.x), 0f,
+                        basePosition.z + (fz * size.z));
+
+                    int first, second;
+                    RoadNodeGround.ToHeightmapCell(world, basePosition, size, resolution, out first, out second);
+
+                    int expectedFirst = (int)(((world.z - basePosition.z) / size.z) * resolution);
+                    int expectedSecond = (int)(((world.x - basePosition.x) / size.x) * resolution);
+
+                    Expect(first == expectedFirst && second == expectedSecond,
+                        Fmt("cell: ({0:R}, {1:R}) mapped to [{2}, {3}] and not [{4}, {5}]",
+                            world.x, world.z, first, second, expectedFirst, expectedSecond), failures);
+                    verified++;
+                }
+            }
+
+            int offFirst, offSecond;
+            RoadNodeGround.ToHeightmapCell(basePosition + new Vector3(size.x * 2f, 0f, size.z * 2f), basePosition,
+                size, resolution, out offFirst, out offSecond);
+            Expect(offFirst >= resolution && offSecond >= resolution,
+                Fmt("cell: a position off the tile must stay off the map, not clamp onto it ([{0}, {1}])",
+                    offFirst, offSecond), failures);
+
+            RoadNodeGround.ToHeightmapCell(basePosition - new Vector3(size.x, 0f, size.z), basePosition, size,
+                resolution, out offFirst, out offSecond);
+            Expect(offFirst < 0 && offSecond < 0,
+                Fmt("cell: a position before the tile must read negative, not clamp to zero ([{0}, {1}])",
+                    offFirst, offSecond), failures);
+
+            string refusal = RoadNodeGround.CutRefusedMessage("Test Road", 7, 12.34f);
+            Expect(refusal.Contains("Test Road") && refusal.Contains("7"),
+                "refusal: the message names neither the road nor the number of points", failures);
+            Expect(refusal.Contains("12.34"),
+                Fmt("refusal: the shortfall is not quoted -- \"{0}\"", refusal), failures);
+            Expect(refusal.Contains("Lower the terrain") && refusal.Contains("height range")
+                    && refusal.Contains("raise the road"),
+                "refusal: the message does not name all three ways out of it", failures);
+
+            builder.Append("RCMVERTICAL ").Append("cell".PadRight(26))
+                   .Append(verified).Append(" cells match the terraform on a 2000 x 1000 tile at -200 m\n");
+        }
+
 
         // ---- helpers ----
 

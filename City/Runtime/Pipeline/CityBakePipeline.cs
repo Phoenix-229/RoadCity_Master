@@ -52,6 +52,21 @@ namespace RoadCityMaster.City
             BakeStage.ProduceRuntime
         };
 
+        /// <summary> What this build's bake stamps itself with, and the figure <see cref="BakeStamp.Evaluate"/> is asked
+        /// to compare an existing city against.
+        ///
+        /// It lives here rather than on the request because the version describes the PIPELINE -- what a bake does -- and
+        /// a caller that supplied its own would let two callers stamp the same output with two versions. It is a constant
+        /// rather than read from the package because the package carries no version yet (the changelog's city layer is
+        /// still Unreleased), and inventing one from a file's date would give the same bake a different stamp on two
+        /// machines.
+        ///
+        /// AUTHORED, in the sense the inspector's range sources use the word: the number is deliberate, not measured.
+        /// Bump the MINOR when a bake's output changes shape and the PATCH when it changes value, because that is what
+        /// <see cref="BakeStamp.CompareSemanticVersions"/> orders and what turns an old city's inspector into a
+        /// "baked by an older generator" line instead of a silent wrong answer. </summary>
+        public const string GeneratorVersion = "1.0.0";
+
         /// <summary> True when the observed run ran its stages in canonical order with no stage repeated: the
         /// stage indices must strictly increase. A blocked stage that is SKIPPED (RM-14/RM-15 today) is
         /// allowed -- the rule forbids running a stage before an earlier one, not omitting one. Writes the

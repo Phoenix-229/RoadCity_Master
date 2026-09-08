@@ -28,23 +28,26 @@ namespace RoadCityMaster
         public int id = 0;
         //Unique ID
         public string uID;
-        // These three cannot be serialized whatever attribute is put on them: KeyValuePair<K,V> is a BCL struct whose
-        // Key and Value are readonly PROPERTIES, not fields, and Unity serializes fields. RoadDefKeysArray and
-        // RoadDefValuesArray two lines below are the same author's answer to the same problem -- one dictionary written
-        // out as two parallel arrays -- so the pattern to follow already exists in this class.
+        // HeightHistory cannot be serialized whatever attribute is put on it: KeyValuePair<K,V> is a BCL struct whose
+        // Key and Value are readonly PROPERTIES, not fields, and Unity serializes fields. It does not need to be. It
+        // is genuinely construction scratch -- Road.cs creates it at 1125 and sets it back to null at 1629, inside one
+        // pass, and TerraformingThreaded and TerrainCalcs are the only things that fill and sort it in between.
         //
-        // HeightHistory is construction scratch either way: Road.cs creates it at ~996 and sets it back to null at
-        // ~1286, inside one pass.
+        // BridgeParams and TunnelParams were the same declaration and were NOT scratch, which is what B-25 fixed.
+        // Setup() fills them, SplineC has no Awake or Start, and Road.cs calls Setup() only while constructing -- so
+        // after a scene reload they were null, and TunnelRunReader, GroundConformRecord and the eight span queries at
+        // the bottom of this file all took their null branch and reported no bridge and no tunnel on a road that has
+        // both. Their element type is now SplineSpan, a two-float serializable struct, here and at every reader, so a
+        // span is stored in the scene with the road that produced it. Unity hands a serialized List back empty rather
+        // than null, which is the case every one of those readers already answers with "no span here".
         //
-        // BridgeParams and TunnelParams are different, and the attribute records a gap rather than closing it. Setup()
-        // fills them, SplineC has no Awake or Start, and Road.cs calls Setup() only while constructing -- so after a
-        // scene reload they are null, and TunnelRunReader, GroundConformRecord and the four span queries at the bottom
-        // of this file all take their null branch and report no bridge and no tunnel. Persisting them means replacing
-        // the element type with a two-float serializable struct, in the readers as well as here. Recorded as B-25.
-        [System.NonSerialized]
-        public List<KeyValuePair<float, float>> BridgeParams;
-        [System.NonSerialized]
-        public List<KeyValuePair<float, float>> TunnelParams;
+        // [HideInInspector] and not a registry row: these are derived, rebuilt wholesale by Setup() from the nodes'
+        // isBridgeStart / isTunnelStart flags, so they are persisted bookkeeping and not an author field -- the same
+        // position Road.appliedRoadClass is in, and the reason InspectorFieldRegistry deliberately has no row for it.
+        [HideInInspector]
+        public List<SplineSpan> BridgeParams;
+        [HideInInspector]
+        public List<SplineSpan> TunnelParams;
         [System.NonSerialized]
         public List<KeyValuePair<float, float>> HeightHistory;
         public int[] RoadDefKeysArray;
@@ -190,8 +193,8 @@ namespace RoadCityMaster
             {
                 BridgeParams.Clear();
             }
-            BridgeParams = new List<KeyValuePair<float, float>>();
-            KeyValuePair<float, float> KVP;
+            BridgeParams = new List<SplineSpan>();
+            SplineSpan span;
             #endregion
 
 
@@ -200,7 +203,7 @@ namespace RoadCityMaster
             {
                 TunnelParams.Clear();
             }
-            TunnelParams = new List<KeyValuePair<float, float>>();
+            TunnelParams = new List<SplineSpan>();
 
             if (nodesCount > 1)
             {
@@ -252,8 +255,8 @@ namespace RoadCityMaster
                         }
                         if (splineEnd > 0f || RootUtils.IsApproximately(splineEnd, 0f, 0.0001f))
                         {
-                            KVP = new KeyValuePair<float, float>(splineStart, splineEnd);
-                            BridgeParams.Add(KVP);
+                            span = new SplineSpan(splineStart, splineEnd);
+                            BridgeParams.Add(span);
                         }
                     }
 
@@ -274,8 +277,8 @@ namespace RoadCityMaster
 
                         if (splineEnd > 0f || RootUtils.IsApproximately(splineEnd, 0f, 0.0001f))
                         {
-                            KVP = new KeyValuePair<float, float>(splineStart, splineEnd);
-                            TunnelParams.Add(KVP);
+                            span = new SplineSpan(splineStart, splineEnd);
+                            TunnelParams.Add(span);
                         }
                     }
 
@@ -1779,7 +1782,7 @@ namespace RoadCityMaster
         #region "Bridges"
         public bool IsInBridge(float _p)
         {
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (BridgeParams == null)
             {
                 return false;
@@ -1791,12 +1794,12 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = BridgeParams[index];
-                if (RootUtils.IsApproximately(KVP.Key, _p, 0.0001f) || RootUtils.IsApproximately(KVP.Value, _p, 0.0001f))
+                span = BridgeParams[index];
+                if (RootUtils.IsApproximately(span.start, _p, 0.0001f) || RootUtils.IsApproximately(span.end, _p, 0.0001f))
                 {
                     return true;
                 }
-                if (_p > KVP.Key && _p < KVP.Value)
+                if (_p > span.start && _p < span.end)
                 {
                     return true;
                 }
@@ -1810,7 +1813,7 @@ namespace RoadCityMaster
             float tDist = 20f / distance;
             float OrigP = _p;
             _p += tDist;
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (BridgeParams == null)
             {
                 return 1f;
@@ -1822,15 +1825,15 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = BridgeParams[index];
+                span = BridgeParams[index];
 
-                if (RootUtils.IsApproximately(KVP.Key, _p, 0.0001f) || RootUtils.IsApproximately(KVP.Value, _p, 0.0001f))
+                if (RootUtils.IsApproximately(span.start, _p, 0.0001f) || RootUtils.IsApproximately(span.end, _p, 0.0001f))
                 {
-                    return ((KVP.Key - OrigP) / tDist);
+                    return ((span.start - OrigP) / tDist);
                 }
-                if (_p > KVP.Key && _p < KVP.Value)
+                if (_p > span.start && _p < span.end)
                 {
-                    return ((KVP.Key - OrigP) / tDist);
+                    return ((span.start - OrigP) / tDist);
                 }
             }
             return 1f;
@@ -1839,7 +1842,7 @@ namespace RoadCityMaster
 
         public bool IsInBridgeTerrain(float _p)
         {
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (BridgeParams == null)
             {
                 return false;
@@ -1851,12 +1854,12 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = BridgeParams[index];
-                if (RootUtils.IsApproximately(KVP.Key + (10f / distance), _p, 0.0001f) || RootUtils.IsApproximately(KVP.Value - (10f / distance), _p, 0.0001f))
+                span = BridgeParams[index];
+                if (RootUtils.IsApproximately(span.start + (10f / distance), _p, 0.0001f) || RootUtils.IsApproximately(span.end - (10f / distance), _p, 0.0001f))
                 {
                     return true;
                 }
-                if (_p > (KVP.Key + (10f / distance)) && _p < (KVP.Value - (10f / distance)))
+                if (_p > (span.start + (10f / distance)) && _p < (span.end - (10f / distance)))
                 {
                     return true;
                 }
@@ -1867,7 +1870,7 @@ namespace RoadCityMaster
 
         public float GetBridgeEnd(float _p)
         {
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (BridgeParams == null)
             {
                 return -1f;
@@ -1879,10 +1882,10 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = BridgeParams[index];
-                if (_p >= KVP.Key && _p <= KVP.Value)
+                span = BridgeParams[index];
+                if (_p >= span.start && _p <= span.end)
                 {
-                    return KVP.Value;
+                    return span.end;
                 }
             }
             return -1f;
@@ -1893,7 +1896,7 @@ namespace RoadCityMaster
         #region "Tunnels"
         public bool IsInTunnel(float _p)
         {
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (TunnelParams == null)
             {
                 return false;
@@ -1905,12 +1908,12 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = TunnelParams[index];
-                if (RootUtils.IsApproximately(KVP.Key, _p, 0.0001f) || RootUtils.IsApproximately(KVP.Value, _p, 0.0001f))
+                span = TunnelParams[index];
+                if (RootUtils.IsApproximately(span.start, _p, 0.0001f) || RootUtils.IsApproximately(span.end, _p, 0.0001f))
                 {
                     return true;
                 }
-                if (_p > KVP.Key && _p < KVP.Value)
+                if (_p > span.start && _p < span.end)
                 {
                     return true;
                 }
@@ -1924,7 +1927,7 @@ namespace RoadCityMaster
             float tDist = 20f / distance;
             float OrigP = _p;
             _p += tDist;
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (TunnelParams == null)
             {
                 return 1f;
@@ -1936,15 +1939,15 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = TunnelParams[index];
+                span = TunnelParams[index];
 
-                if (RootUtils.IsApproximately(KVP.Key, _p, 0.0001f) || RootUtils.IsApproximately(KVP.Value, _p, 0.0001f))
+                if (RootUtils.IsApproximately(span.start, _p, 0.0001f) || RootUtils.IsApproximately(span.end, _p, 0.0001f))
                 {
-                    return ((KVP.Key - OrigP) / tDist);
+                    return ((span.start - OrigP) / tDist);
                 }
-                if (_p > KVP.Key && _p < KVP.Value)
+                if (_p > span.start && _p < span.end)
                 {
-                    return ((KVP.Key - OrigP) / tDist);
+                    return ((span.start - OrigP) / tDist);
                 }
             }
             return 1f;
@@ -1953,7 +1956,7 @@ namespace RoadCityMaster
 
         public bool IsInTunnelTerrain(float _p)
         {
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (TunnelParams == null)
             {
                 return false;
@@ -1965,12 +1968,12 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = TunnelParams[index];
-                if (RootUtils.IsApproximately(KVP.Key + (10f / distance), _p, 0.0001f) || RootUtils.IsApproximately(KVP.Value - (10f / distance), _p, 0.0001f))
+                span = TunnelParams[index];
+                if (RootUtils.IsApproximately(span.start + (10f / distance), _p, 0.0001f) || RootUtils.IsApproximately(span.end - (10f / distance), _p, 0.0001f))
                 {
                     return true;
                 }
-                if (_p > (KVP.Key + (10f / distance)) && _p < (KVP.Value - (10f / distance)))
+                if (_p > (span.start + (10f / distance)) && _p < (span.end - (10f / distance)))
                 {
                     return true;
                 }
@@ -1981,7 +1984,7 @@ namespace RoadCityMaster
 
         public float GetTunnelEnd(float _p)
         {
-            KeyValuePair<float, float> KVP;
+            SplineSpan span;
             if (TunnelParams == null)
             {
                 return -1f;
@@ -1993,10 +1996,10 @@ namespace RoadCityMaster
             }
             for (int index = 0; index < cCount; index++)
             {
-                KVP = TunnelParams[index];
-                if (_p >= KVP.Key && _p <= KVP.Value)
+                span = TunnelParams[index];
+                if (_p >= span.start && _p <= span.end)
                 {
-                    return KVP.Value;
+                    return span.end;
                 }
             }
             return -1f;

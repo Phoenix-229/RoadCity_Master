@@ -63,6 +63,18 @@ namespace RoadCityMaster.City
         /// <summary> Port / logistics: bound to a water edge, lots sized around handling equipment -- NOT industrial. </summary>
         public bool boundToWaterEdge = false;
 
+        /// <summary> Market / open trading ground: this zone is an OPEN SURFACE, not a building volume -- a large paved
+        /// or covered ground with stalls, distinguished from general commercial the way a real market is (a surface on
+        /// the busiest street, not a taller building). Storeys stay at one; the coverage is the trading ground itself.
+        /// A boolean because a market is a KIND of place, exactly like informal settlement and port -- DATA, not a code
+        /// special-case in the placer. </summary>
+        public bool openSurface = false;
+
+        /// <summary> Market frontage rule: this zone seeks the BUSIEST street frontage rather than the tallest envelope,
+        /// so the placer sites it against the highest-traffic edge available. Data, paired with <see cref="openSurface"/>
+        /// so "a market, not an office block" is two authored facts and not a hard-coded exception. </summary>
+        public bool frontsOnBusiestStreet = false;
+
         /// <summary> RM-45 overlap precedence: when two zones are painted over the same cell, the higher precedence
         /// wins BY DECLARATION (a civic zone painted over a residential one wins), never by paint order (paint order
         /// is not serialised and not reproducible). Where precedence TIES the resolver refuses and reports the cell. </summary>

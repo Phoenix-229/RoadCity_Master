@@ -18,7 +18,7 @@ namespace RoadCityMaster.City.Editor
     /// background and tells the author nothing, and a progress panel can be perfectly drawn over a dispatcher that
     /// still blocks.
     ///
-    /// Six sweeps, and what each one would catch:
+    /// Eight sweeps, and what each one would catch:
     ///
     /// 1. The modal bar, tool-wide. RM-100's gate reads <c>Road.cs</c> only, because that was where the bar was raised
     ///    from. That is no longer enough: the file that raised the other one -- a demo window with a seconds field and
@@ -37,10 +37,41 @@ namespace RoadCityMaster.City.Editor
     /// 6. The reporter itself, read as source, because it lives in the editor assembly and this gate is compiled into
     ///    the runtime one. What is checked there is exactly what cannot be checked by calling it: the subscription is a
     ///    named method, the three passes run in the order that stops an entry being reaped before its outcome arrives,
-    ///    and every finish goes through the existence guard. </summary>
+    ///    and every finish goes through the existence guard.
+    /// 7. One owner, one entry. A slider being dragged asks for a build per frame, and all but the last of them are
+    ///    thrown away; the queue and the panel both have to collapse to the one that will actually produce a road,
+    ///    without touching a second road that happens to carry the same name.
+    /// 8. The build's report of its own decisions, which is the other half of "the build tells the author what it did".
+    ///    The panel says a build ran; it cannot say the build quietly gave up on something. B-12's terraform truncates
+    ///    a side slope that cannot reach natural ground within the authored reach and counts each one; B-14 made that
+    ///    count reach the console. This sweep is source-read for the same reason 6 is -- driving a terraform needs a
+    ///    Road on a Terrain -- and it covers the count being both REPORTED and RIGHT: reported from both build
+    ///    branches, and not zeroed once per terrain tile, which on a road crossing two tiles would report the last
+    ///    tile's truncations as though they were all of them. </summary>
     public static class CityBuildProgressGate
     {
         #region "Entry"
+        // UnityEngine and UnityEditor are both reached fully qualified: this file imports neither, and inside
+        // namespace RoadCityMaster.City.Editor the bare identifier `Editor` binds to the NAMESPACE, so adding
+        // `using UnityEditor;` beside `using System;` would make Object and Progress ambiguous (CS0104).
+        [UnityEditor.MenuItem("Window/Road City Master/Testing/City build progress and cancel")]
+        public static void RunFromMenu()
+        {
+            string report;
+            if (Run(out report)) { UnityEngine.Debug.Log(report); }
+            else { UnityEngine.Debug.LogError(report); }
+        }
+
+        /// <summary> Headless entry point: Unity.exe -batchmode -quit -executeMethod
+        /// RoadCityMaster.City.Editor.CityBuildProgressGate.RunBatch. Exits 1 on failure. </summary>
+        public static void RunBatch()
+        {
+            string report;
+            bool passed = Run(out report);
+            UnityEngine.Debug.Log(report);
+            UnityEditor.EditorApplication.Exit(passed ? 0 : 1);
+        }
+
         public static bool Run(out string report)
         {
             List<string> failures = new List<string>();
@@ -53,6 +84,7 @@ namespace RoadCityMaster.City.Editor
             SweepOutcomesExplainEveryEnding(failures, measured);
             SweepTheReporterCannotDrift(failures, measured);
             SweepOneOwnerOneEntry(failures, measured);
+            SweepTruncatedBatterIsReported(failures, measured);
 
             StringBuilder text = new StringBuilder();
             text.Append("RM-101 progress and cancel\n").Append(measured.ToString());
@@ -771,6 +803,97 @@ namespace RoadCityMaster.City.Editor
 
             measured.Append("  supersede: 2 queued duplicates dropped, 1 in flight asked to stop, same-name roads")
                     .Append(" untouched, ticket carries owner, reporter retires older entry\n");
+        }
+
+
+        /// <summary> B-14. The build's report of a decision it made on its own: a side slope that could not reach
+        /// natural ground inside the authored reach, truncated, and the ground below it left flat.
+        ///
+        /// Source-read rather than driven, for sweep 6's reason -- a terraform needs a Road on a Terrain, and this gate
+        /// is compiled into the runtime assembly while <c>Road.cs</c>'s build path is editor-guarded. What is asserted
+        /// is the shape a warning has to have to be worth anything: it exists, it comes from BOTH build branches, and
+        /// the number in it is the whole road's.
+        ///
+        /// The both-branches test is written as an equality against <c>StoreTerrainHistory</c> rather than by naming
+        /// the two methods, because that is the invariant that survives a third branch being added: whatever
+        /// terraforms takes the result into the Terrain and stores its history, and whatever stores its history has to
+        /// say what it gave up on. Naming <c>ConstructRoad2</c> and <c>UpdateRoadNoMultiThreading</c> would pass on the
+        /// day a third path is written with no report in it. </summary>
+        private static void SweepTruncatedBatterIsReported(List<string> failures, StringBuilder measured)
+        {
+            string road = ReadSource("Scripts/Road.cs");
+            string threaded = ReadSource("Scripts/Terrain/TerraformingThreaded.cs");
+            string terraforming = ReadSource("Scripts/Terrain/Terraforming.cs");
+            if (road == null || threaded == null || terraforming == null)
+            {
+                failures.Add("one of Road.cs, Terrain/TerraformingThreaded.cs or Terrain/Terraforming.cs cannot be"
+                    + " read, so whether a truncated side slope is reported cannot be established");
+                return;
+            }
+
+            int at = 0;
+            Expect(AppearsInCode(road, "Threading.TerraformingThreaded.BatterHandBackCount", out at),
+                "nothing reads BatterHandBackCount. The terraform counts every station and side whose batter was cut"
+                + " off before it reached the ground and then the figure is discarded, so the tool decides to leave a"
+                + " flat shelf under the road, records that it did, and tells the author nothing", failures);
+
+            int reports = CodeLineCount(road, "ReportTruncatedBatters();");
+            int stores = CodeLineCount(road, "StoreTerrainHistory();");
+            Expect(reports == stores, "the terrain result is taken into the Terrain from " + stores + " place(s) but"
+                + " the truncated-batter warning is raised from " + reports + ". One branch terraforming quietly is"
+                + " worse than neither doing it: the warning appears for a road built with the threaded path and not"
+                + " for the same road built synchronously, which reads as an intermittent bug rather than a decision",
+                failures);
+            Expect(stores > 1, "there is only " + stores + " terraform result being stored, so this sweep's"
+                + " both-branches claim is no longer checking anything -- if a build branch was removed, say so here",
+                failures);
+            Expect(CodeLineCount(road, "ReportTruncatedBatters") == reports + 1,
+                "the reporter is not defined exactly once for its call sites, so two branches may be warning in two"
+                + " different wordings about the same thing", failures);
+
+            Expect(AppearsInCode(road, "Debug.LogWarning(\"Road & City Master: the side slope on ", out at),
+                "the truncated-slope report does not open with the product name, or is not a warning. It must be a"
+                + " warning and not an error -- truncating is a legitimate outcome, and real practice benches, retains"
+                + " or re-aligns at that point, which is the author's call and not the tool's", failures);
+            Expect(AppearsInCode(road, "batterMaxReachMetres.ToString(", out at)
+                && AppearsInCode(road, "batterRunPerRise.ToString(", out at),
+                "the report does not quote the two fields that decide the truncation, so an author who reads it knows"
+                + " something was cut off but not which control lets them do anything about it", failures);
+
+            // The count has to bracket the whole road, not the last of its terrain tiles.
+            Expect(CodeLineCount(threaded, "ResetBatterHandBackCount();") == 0,
+                "the batter count is reset from inside TerraformingThreaded. DoRects runs once per terrain tile, so a"
+                + " road crossing two tiles has the first tile's truncations zeroed before the second tile starts and"
+                + " the reported figure is the last tile's alone", failures);
+            int armAt = 0, resetAt = 0, immediateAt = 0;
+            bool armed = AppearsInCode(terraforming, "City.TerrainBuildSettings.ApplyToWorker();", out armAt)
+                && AppearsInCode(terraforming, "Threading.TerraformingThreaded.ResetBatterHandBackCount();", out resetAt)
+                && AppearsInCode(terraforming, "Threading.TerrainCalcsStatic.RunMe(", out immediateAt);
+            Expect(armed, "the reset does not sit beside the call that arms the worker in Terraforming.cs, which is the"
+                + " one main-thread moment that covers the threaded branch and the immediate branch alike", failures);
+            Expect(armed && armAt < resetAt && resetAt < immediateAt,
+                "the reset is at line " + resetAt + ", the worker armed at " + armAt + " and the immediate branch at "
+                + immediateAt + ": a reset after the branch zeroes the count the branch just produced", failures);
+            Expect(CodeLineCount(terraforming, "ResetBatterHandBackCount") == 1,
+                "the count is reset from more than one place in Terraforming.cs, so the bracket around one road's"
+                + " terraform is not a bracket", failures);
+
+            // What the count is ABOUT: the slope starts at the edge of what the road emits, or the sentence in the
+            // warning is not true of the road on screen.
+            Expect(AppearsInCode(threaded, "City.TerrainFootprint.FlattenedHalfWidthMetres(", out at),
+                "the flattened band is not sized through City.TerrainFootprint, the class that owns the relationship"
+                + " between the built section and the ground held flat around it", failures);
+            Expect(AppearsInCode(threaded, "_spline.road.CrossSectionWidth() * 0.5f", out at),
+                "the flattened band is not measured from the emitted cross-section. RoadWidth() is laneWidth times the"
+                + " lane count -- running lanes only -- so a band sized from it stops flat ground at the edge of the"
+                + " lanes and breaks the slope underneath the road's own shoulder and median meshes", failures);
+            Expect(AppearsInCode(threaded, "if (Sep > outerBound) { Sep = outerBound; }", out at),
+                "the flattened half-width is not clamped to the outer bound the write buffers are sized from, so a"
+                + " wide enough authored verge writes past the end of them", failures);
+
+            measured.Append("  truncated batter: counted once per road (reset beside ApplyToWorker, not per tile),")
+                    .Append(" warned from all ").Append(stores).Append(" terraform branch(es), band from the emitted")
+                    .Append(" section through TerrainFootprint\n");
         }
         #endregion
     }

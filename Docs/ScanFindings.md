@@ -61,7 +61,7 @@ nothing in the tool calls it except entry points. All are `namespace RoadCityMas
 | IntersectionObjects.cs | RoadCityMaster | `static IntersectionObjects` | EngineIntegration, prefab/material paths | RoadIntersection |
 | Intersections.cs | RoadCityMaster | `static Intersections` | Construction, SplineC | RoadIntersection, RoadConstructorBufferMaker |
 | Navigation.cs | RoadCityMaster | `static Navigation` | Road, SplineC | RoadSystem / runtime queries (leaf-ish) |
-| RenderQueue.cs | **(none)** | `static RenderQueue` | Material | material sort order (util). **No namespace declared — finding.** |
+| RenderQueue.cs | RoadCityMaster | `static RenderQueue` | Material | material sort order (util). Recorded here as `(none)` and as a finding; it is neither. Line 1 is `namespace RoadCityMaster` behind a UTF-8 **BOM**, which is why a scan anchored on `^namespace` reports the file as having none — corrected in B-21. |
 | RigidBody.cs | RoadCityMaster | `RigidBody : MonoBehaviour` | UnityEngine physics | runtime vehicle component (leaf) |
 | Road.cs | RoadCityMaster | `Road : MonoBehaviour`, `enum RoadMaterialDropdownEnum` | SplineC, RoadConstructorBufferMaker, Terraforming, EdgeObjectMaker | RoadEditor, RoadSystem, Terraforming — the central type |
 | RoadAutomation.cs | RoadCityMaster.Roads | `static RoadAutomation` | Road, RoadSystem, SplineC | EditorMenu, external creation API |
@@ -219,7 +219,7 @@ into `Library/Thumbs`); `ExtrudedObjects` records serialize `SplinatedMeshMaker`
 |---|---|---|
 | **Over-wide terraform — the road "moves far too much dirt" (RM-38)** | `Terrain/TerraformingThreaded.cs:158`; `Terrain/TerrainCalcsStatic.cs:19` (commented `tDistance = RoadWidth()*2f`); `Terrain/RoadTerrain.cs:27` (`splatWidth = 30f`) | The terrain-modification extent is derived as a multiple of `Road.RoadWidth()` (`Sep = RoadWidth()*0.5f` plus the cut/falloff band), so the flattened/splatted band is far wider than the carriageway footprint. RM-38 narrows this to the true edge-of-formation. |
 | **Awkward road bending — poor horizontal alignment (RM-75, § 10.36)** | `Spline/SplineC.cs:353-379` | Node orientation is computed per-node with `Quaternion.LookRotation` to the next node and `Quaternion.identity` at the ends; there is no proper horizontal-curve (spiral/arc) fit, so tight or unevenly spaced nodes read as kinks. RM-75 adds real horizontal alignment on top of guided placement. |
-| **`RenderQueue.cs` declares no namespace** (structural hygiene) | `Scripts/RenderQueue.cs` | The only runtime file outside `namespace RoadCityMaster`; a global-namespace type risks collision. Noted for the RM-06/RM-69 boundary+rename work; not behaviour-affecting today. |
+| ~~**`RenderQueue.cs` declares no namespace** (structural hygiene)~~ **Withdrawn — it declares one, and always did.** | `Scripts/RenderQueue.cs:1` | The file's first line is `namespace RoadCityMaster`, preceded by a UTF-8 **BOM** (`EF BB BF`). A scan that anchors on `^namespace` does not match a line beginning with those three bytes, which is how a file that was never in the global namespace came to be recorded as the only one that was — and why nothing was ever left for RM-06/RM-69 to move. B-21 found it while re-running the searches behind `RenderQueue`'s disposition; a BOM-tolerant sweep of every runtime `.cs` now reports no file without a namespace. |
 
 ## Explicit callouts carried by later tasks
 

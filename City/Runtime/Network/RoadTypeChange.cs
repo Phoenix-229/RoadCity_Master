@@ -116,16 +116,26 @@ namespace RoadCityMaster.City
         #endregion
 
 
-        #region "The four measured values the class table cites"
+        #region "The five measured values the class table cites"
         /// <summary> The values the class table carries a citation for, and therefore the only ones whose band this
         /// file is entitled to state. Median width is absent on purpose: its floor comes from the divider's own
-        /// footprint above, not from the class table, so it has no row to cite. </summary>
+        /// footprint above, not from the class table, so it has no row to cite.
+        ///
+        /// RM-110 (B-10) made shoulder width the fifth. It used to be reported by a hand-rolled block below that
+        /// stated no band, because the class table cited no shoulder figure; now that every row cites one, the
+        /// shoulder goes through the same <see cref="AddMeasured"/> path as the rest and a shoulder widened until it
+        /// reads as a lane is flagged as a conflict instead of passing unremarked.
+        ///
+        /// The three helpers below are if-chains whose LAST line is a fall-through for the last member listed here,
+        /// not a default: a member added to this enum must be given its own branch in all three, or it will silently
+        /// read as <see cref="ShoulderWidth"/>. </summary>
         private enum Measured
         {
             LaneWidth,
             LaneTotal,
             DesignSpeed,
-            MaxGrade
+            MaxGrade,
+            ShoulderWidth
         }
 
 
@@ -134,7 +144,8 @@ namespace RoadCityMaster.City
             if (m == Measured.LaneWidth) { return p.LaneWidthM; }
             if (m == Measured.LaneTotal) { return p.LaneCount; }
             if (m == Measured.DesignSpeed) { return p.DesignSpeedKPH; }
-            return p.MaxGrade;
+            if (m == Measured.MaxGrade) { return p.MaxGrade; }
+            return p.ShoulderWidthM;
         }
 
 
@@ -143,7 +154,8 @@ namespace RoadCityMaster.City
             if (m == Measured.LaneWidth) { return p.LaneWidthCite.Reference; }
             if (m == Measured.LaneTotal) { return p.LaneCountCite.Reference; }
             if (m == Measured.DesignSpeed) { return p.DesignSpeedCite.Reference; }
-            return p.MaxGradeCite.Reference;
+            if (m == Measured.MaxGrade) { return p.MaxGradeCite.Reference; }
+            return p.ShoulderWidthCite.Reference;
         }
 
 
@@ -152,7 +164,8 @@ namespace RoadCityMaster.City
             if (m == Measured.LaneWidth) { return "laneWidth"; }
             if (m == Measured.LaneTotal) { return "lanes (total)"; }
             if (m == Measured.DesignSpeed) { return "speedLimitKPH"; }
-            return "maxGrade";
+            if (m == Measured.MaxGrade) { return "maxGrade"; }
+            return "shoulderWidth";
         }
 
 
@@ -190,9 +203,9 @@ namespace RoadCityMaster.City
         ///
         /// A row is a CONFLICT only when the authored value lies outside the span every class in the cited table works
         /// within — that is a value no road in the table sanctions, which is worth saying out loud. An override inside
-        /// the span is just a design decision and is reported as kept. Where the table carries no citation for a field
-        /// (shoulder width, and the three choices) no band is stated at all, because a band nobody cited would be a
-        /// figure invented here.
+        /// the span is just a design decision and is reported as kept. Only the three CHOICES — shoulders on or off,
+        /// one-way, and which divider — get no band, because a choice has no span to lie outside of; every dimensioned
+        /// field the table cites, shoulder width included since RM-110, is banded from the table itself.
         ///
         /// If the outgoing class is not in the table, its defaults are unknowable, so every value reads as an override.
         /// That over-reports rather than under-reports, which is the right way round for a report an author acts on. </summary>
@@ -202,18 +215,13 @@ namespace RoadCityMaster.City
             List<TypeOverride> rows = new List<TypeOverride>();
             RoadClassProfile prev = RoadClassDefaults.For(applied);
             RoadClassProfile next = RoadClassDefaults.For(incoming);
-            CultureInfo ic = CultureInfo.InvariantCulture;
 
             AddMeasured(rows, Measured.LaneWidth, current.laneWidth, prev, next);
             AddMeasured(rows, Measured.LaneTotal, LaneModel.Total(current.lanesForward, current.lanesBackward), prev, next);
             AddMeasured(rows, Measured.DesignSpeed, current.speedLimitKPH, prev, next);
             AddMeasured(rows, Measured.MaxGrade, current.maxGrade, prev, next);
+            AddMeasured(rows, Measured.ShoulderWidth, current.shoulderWidth, prev, next);
 
-            if (RoadClassDefaults.IsOverride(prev.ShoulderWidthM, current.shoulderWidth))
-            {
-                rows.Add(new TypeOverride("shoulderWidth", current.shoulderWidth.ToString("R", ic),
-                    ((float)next.ShoulderWidthM).ToString("R", ic), "", "", false));
-            }
             if (current.isShouldersEnabled != prev.ShoulderEnabled)
             {
                 rows.Add(new TypeOverride("isShouldersEnabled", current.isShouldersEnabled ? "on" : "off",

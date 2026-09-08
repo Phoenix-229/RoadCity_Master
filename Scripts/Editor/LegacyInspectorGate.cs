@@ -3,6 +3,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 #endregion
@@ -35,6 +36,22 @@ namespace RoadCityMaster
         private const string RoadComponent = "Road";
         private const string TerrainFile = "TerrainEditor.cs";
         private const string TerrainComponent = "RoadTerrain";
+
+        /// <summary> The RoadSystem inspector. It is not in the registry's scope -- the values it draws are the system's
+        /// own build options, which no field descriptor covers -- so it is absent from the cases above and named here
+        /// instead, for the two cases that are about how an inspector behaves rather than which values it owns: the
+        /// colon rule, and B-6's "an inspector does not edit the scene while it draws". </summary>
+        private const string SystemFile = "RoadSystemEditor.cs";
+
+        /// <summary> The opening of the saving-meshes warning, assembled from two halves so that THIS file is not itself
+        /// one of the copies it counts. Comments are blanked before a file is read, but a string literal is not, and a
+        /// gate that fails because of its own search term would be its own worst false positive. </summary>
+        private static readonly string SavingMeshesSentence = "Saving meshes as assets is slow"
+            + ": it writes every generated mesh into the project";
+
+        /// <summary> The name of the deleted camera setter, in halves for the same reason: a scan for it that matched its
+        /// own failure message would report this gate file as the fault. </summary>
+        private static readonly string DeletedCameraSetter = "EditorCameraSet" + "Single";
         #endregion
 
 
@@ -74,6 +91,8 @@ namespace RoadCityMaster
             CaseTheCensusCoversEveryDrawnField(builder, failures);
             CaseEveryWindowHasAWayIn(builder, failures);
             CaseInputsCommitOnFocusOut(builder, failures);
+            CaseNoControlLabelEndsInAColon(builder, failures);
+            CaseTheSystemInspectorDoesNotEditWhileItDraws(builder, failures);
 
             foreach (string failure in failures)
             {
@@ -250,10 +269,17 @@ namespace RoadCityMaster
         #endregion
 
 
-        #region "Case 3 -- the drawer labels the unit and never clamps"
-        /// <summary> What an author gets in exchange for the hand-rolled controls going away: the unit is on the label,
-        /// and a value outside the field's real-world band produces a sentence naming the limit and where it comes
-        /// from, with the value left exactly as typed.
+        #region "Case 3 -- the drawer puts the unit in its own column, describes the field, and never clamps"
+        /// <summary> What an author gets in exchange for the hand-rolled controls going away: the unit stands in a column
+        /// of its own beside the value, the field's own sentence is on the hover, and a value outside the field's
+        /// real-world band produces a sentence naming the limit and where it comes from, with the value left exactly as
+        /// typed.
+        ///
+        /// B-5 changed the first of those three and this case with it. The unit used to be appended to the prefix label
+        /// (`"Lane width  (m)"`), which is what this gate asserted; fault 5 is that a unit inside the label competes with
+        /// the field's name for the label column and pushes the longest labels onto a second line. So the assertion is
+        /// inverted rather than deleted: the composition must be GONE from the drawer, and the column must be there
+        /// instead. Deleting it would have left the tool free to drift back to a bare number with nothing to catch it.
         ///
         /// Not clamping is the part worth gating. A clamp is the tempting fix -- it keeps the data always valid -- and
         /// it is wrong here for a reason the removed splat-width slider shows plainly: an author who types 400 into a
@@ -267,9 +293,17 @@ namespace RoadCityMaster
             string[] drawer = CodeLines("InspectorFieldDrawer.cs", failures);
             string body = string.Join("\n", drawer);
 
-            Expect(body.Contains("d.label + \"  (\" + unit + \")\""),
-                "unit-label: the drawer no longer appends the unit to the label, so numeric fields ship bare",
-                failures);
+            Expect(!body.Contains("d.label + \"  (\" + unit + \")\""),
+                "unit-column: the drawer has put the unit back inside the prefix label, which is the overflow B-5 "
+                + "fault 5 removed", failures);
+            Expect(body.Contains("DrawUnit(d)"),
+                "unit-column: the drawer draws no unit cell, so numeric fields ship bare", failures);
+            Expect(body.Contains("InspectorTextLayout.UnitColumnWidth()"),
+                "unit-column: the unit cell is not sized from the one shared column width, so the tokens will not line "
+                + "up down the inspector", failures);
+            Expect(body.Contains("new GUIContent(d.label, d.tooltip)"),
+                "tooltip: the drawer does not put the descriptor's sentence on the row's content, so fault 8's hover "
+                + "text never reaches an author", failures);
             Expect(body.Contains("MessageType.Warning"),
                 "no-clamp: the drawer raises no warning, so an out-of-range value is passed silently", failures);
             Expect(!body.Contains("Mathf.Clamp"),
@@ -279,6 +313,23 @@ namespace RoadCityMaster
                 "no-clamp: the drawer uses a Slider, which clamps silently at its own bounds", failures);
             Expect(!body.Contains("EditorGUILayout.IntSlider"),
                 "no-clamp: the drawer uses an IntSlider, which clamps silently at its own bounds", failures);
+
+            // B-5, fault 8. Every registered field carries a hover sentence. Asserted here, in the case that owns what a
+            // field row gives an author, because the tooltip arrives on the same GUIContent as the label: a row whose
+            // descriptor shipped without one looks identical to a row whose drawer dropped it.
+            //
+            // The length floor is what stops a stub. `40` is AUTHORED (C-15): a tooltip has to be a SENTENCE about what
+            // the value does, and no useful one is shorter than that -- the shortest row in the registry runs to 120
+            // characters. A word, a repeated label, or a `TODO` fails, which is the only failure mode a machine can
+            // actually tell apart from prose.
+            IList<FieldDescriptor> registered = InspectorFieldRegistry.All();
+            for (int i = 0; i < registered.Count; i++)
+            {
+                FieldDescriptor d = registered[i];
+                Expect(d.tooltip != null && d.tooltip.Length >= 40,
+                    "tooltip: " + d.component + "." + d.field + " has no hover sentence, so its row tells an author "
+                    + "what the field is called and nothing about what it does", failures);
+            }
 
             // And behaviourally, on the field whose band the tool ships a default in the middle of: validation reports
             // and returns, it does not hand back a corrected number. FieldDescriptor.Validate returns a verdict and a
@@ -298,7 +349,7 @@ namespace RoadCityMaster
             }
 
             builder.Append("RCMLEGACYUI ").Append("unit-and-no-clamp".PadRight(24))
-                   .Append("units are on the labels and out-of-range warns instead of clamping\n");
+                   .Append("units are in their own column, every field is described, out-of-range warns\n");
         }
         #endregion
 
@@ -416,9 +467,51 @@ namespace RoadCityMaster
                 "coalesce: " + RoadFile + " asks for no rebuild through the shell", failures);
             Expect(road.Contains("LegacyInspectorShell.BuildLine("),
                 "building: " + RoadFile + " never says that the road it is showing is building", failures);
+            // B-5, fault 7, narrowed this. The rule was a blanket ban on disabling anything, written when the only
+            // reason a control had ever been disabled here was that the road was building -- and that reason is still
+            // wrong: an author who spots a mistake mid-build must be able to correct it, with the edit coalesced.
+            // B-5 needed the OTHER half, which the blanket ban forbade: a field governed by a toggle -- a shoulder
+            // width, a grade ceiling -- was HIDDEN when its toggle was off, so switching the toggle made rows appear
+            // and shift everything under them, and an author could not read what the road already had without turning
+            // the feature on. Greyed, the value stays legible with its unit and its band, and the toggle above it
+            // reads as what governs it. So the ban is now on the CONDITION, not on the act: a scope may be opened on
+            // this road's own state and never on the state of a build.
             Expect(!road.Contains("EditorGUI.BeginDisabledGroup"),
-                "building: " + RoadFile + " disables its controls; RM-102 requires editing to stay enabled during a "
-                + "build, with the edit coalesced instead", failures);
+                "building: " + RoadFile + " opens a disabled group by hand; use `using (new EditorGUI.DisabledScope"
+                + "(...))`, which cannot leak if the body returns or throws", failures);
+
+            string[] roadLines = CodeLines(RoadFile, failures);
+            int scopes = 0;
+            for (int i = 0; i < roadLines.Length; i++)
+            {
+                Match m = Regex.Match(roadLines[i], @"new EditorGUI\.DisabledScope\(([^)]*)\)");
+                if (!m.Success) { continue; }
+                scopes++;
+                string condition = m.Groups[1].Value;
+                Expect(condition.Contains("road.is"),
+                    "building: " + RoadFile + " line " + (i + 1) + " disables a control on '" + condition
+                    + "', which is not a state of the road this inspector is editing", failures);
+                for (int b = 0; b < buildStateTokens.Length; b++)
+                {
+                    Expect(!condition.Contains(buildStateTokens[b]),
+                        "building: " + RoadFile + " line " + (i + 1) + " disables a control while the road is building"
+                        + " ('" + buildStateTokens[b] + "'); RM-102 requires editing to stay enabled during a build,"
+                        + " with the edit coalesced instead", failures);
+                }
+            }
+            Expect(scopes > 0,
+                "building: " + RoadFile + " disables nothing at all, so B-5's toggle-governed fields are hidden again",
+                failures);
+
+            // The two fields B-5 named, asserted positively: each is inside a scope governed by its own toggle, so
+            // neither can be quietly put back behind an `if` that hides the row. The field call is matched by the same
+            // fixed form case 2 counts, which is why that call is left unchanged to the byte at both sites.
+            Expect(DisabledScopeGuards(roadLines, "!road.isShouldersEnabled", "\"shoulderWidth\""),
+                "disabled: the shoulder width is not drawn greyed under its own toggle; a field an author cannot read "
+                + "is B-5 fault 7 again", failures);
+            Expect(DisabledScopeGuards(roadLines, "!road.isMaxGradeEnabled", "\"maxGrade\""),
+                "disabled: the grade ceiling is not drawn greyed under its own toggle; a field an author cannot read "
+                + "is B-5 fault 7 again", failures);
 
             // Behaviourally: the shell answers about an owner that is not building without inventing progress, and
             // tolerates the arguments an inspector really passes it -- an empty owner id before a road has one, and a
@@ -895,6 +988,284 @@ namespace RoadCityMaster
         #endregion
 
 
+        #region "Case 6's disabled-control helpers -- B-5, fault 7"
+        /// <summary> The spellings by which a disabled scope would be reading the state of a BUILD rather than the
+        /// state of the road. A control greyed because the road is generating is the fault RM-102 removed: the author
+        /// who notices the mistake is exactly the one who cannot then correct it, and the correction is what the
+        /// coalescing queue exists to absorb. A control greyed because the feature that owns it is switched off is the
+        /// opposite -- it is B-5's fix, and it is why case 6 can no longer ban disabling outright. </summary>
+        private static readonly string[] buildStateTokens =
+        {
+            "Build", "queued", "progress", "isUpdateRequired"
+        };
+
+
+        /// <summary> Whether <paramref name="field"/> is drawn inside a disabled scope opened on
+        /// <paramref name="condition"/>. Six lines of look-ahead, which is the brace, an explaining comment or two,
+        /// and the call: enough for the two sites B-5 names and not enough for the field to have wandered off into
+        /// some other block that merely follows the scope.
+        ///
+        /// <paramref name="field"/> arrives QUOTED -- "\"shoulderWidth\"" -- so that the match is the string literal in
+        /// the Field call and not a mention of the same word in an identifier. </summary>
+        private static bool DisabledScopeGuards(string[] lines, string condition, string field)
+        {
+            string open = "new EditorGUI.DisabledScope(" + condition + ")";
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].IndexOf(open, System.StringComparison.Ordinal) < 0) { continue; }
+                int last = System.Math.Min(lines.Length - 1, i + 6);
+                for (int j = i + 1; j <= last; j++)
+                {
+                    if (lines[j].IndexOf(field, System.StringComparison.Ordinal) >= 0) { return true; }
+                }
+            }
+            return false;
+        }
+        #endregion
+
+
+        #region "Case 11 -- no control label ends in a colon"
+        /// <summary> B-5, fault 2. No label on a control in either legacy inspector ends in a colon.
+        ///
+        /// Unity's prefix label already separates itself from the control it names, so <c>"Gizmos: "</c> reached the
+        /// author as "Gizmos:  " -- a colon and two trailing spaces -- while the label directly under it, written by
+        /// the same file on the same day, had neither. The colon is not wrong in itself; a column of labels where some
+        /// carry one and some do not is, because the eye reads the difference as meaning something.
+        ///
+        /// The scan is on CODE lines, so the comments that quote the old spellings -- and this fix leaves a lot of them,
+        /// since a label's history is the only record of why it reads as it does -- stay legible instead of being
+        /// worded around. A literal is judged only on a line that draws something labelled, and only when the literal
+        /// is a WHOLE argument: <c>LabelField("Nodes: " + count)</c> is a sentence being built and its colon is
+        /// punctuation, where <c>Toggle("Save mesh assets: ", …)</c> is a label and its colon is the fault.
+        ///
+        /// Scoped to this one file on purpose. The other legacy inspectors still spell their labels their own way; each
+        /// is rebuilt under its own register entry, and a gate that failed for a file nobody has reached yet would be
+        /// noise that teaches the suite to be ignored. </summary>
+        private static void CaseNoControlLabelEndsInAColon(StringBuilder builder, List<string> failures)
+        {
+            // B-6 brought the second file in. `RoadSystemEditor` had `"Save mesh assets: "`, `"Custom camera rot:"`,
+            // `"Rotation X:"` and five more, so a rule proved on one inspector and not applied to the next one fixed
+            // would have been a rule about a file rather than about the tool.
+            string[] files = new string[] { RoadFile, SystemFile };
+            int scanned = 0;
+            for (int f = 0; f < files.Length; f++)
+            {
+                string[] lines = CodeLines(files[f], failures);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (!DrawsALabelledControl(lines[i])) { continue; }
+                    scanned++;
+                    foreach (Match m in Regex.Matches(lines[i], "\"[A-Za-z][^\"\n]*:[ ]*\"[ ]*[,)]"))
+                    {
+                        failures.Add("label: " + files[f] + ":" + (i + 1) + " ends a control label in a colon "
+                            + m.Value.Trim() + "; Unity draws the separator itself, so the colon is a second one, and "
+                            + "the labels beside this one carry none");
+                    }
+                }
+            }
+            Expect(scanned > 0,
+                "label: no labelled control was found in the legacy inspectors at all, so nothing was checked (setup)",
+                failures);
+            builder.Append("RCMLEGACYUI ").Append("no-colon-labels".PadRight(24))
+                   .Append("no control label ends in a colon (").Append(scanned).Append(" lines)\n");
+        }
+
+
+        /// <summary> Whether this line puts a label on a control -- the only lines the colon rule applies to. A help
+        /// paragraph is deliberately outside it: those go through <c>RenderHelpParagraph</c>, they are prose rather
+        /// than labels, and prose is allowed to introduce a list with a colon. </summary>
+        private static bool DrawsALabelledControl(string line)
+        {
+            return line.Contains("EditorGUILayout.") || line.Contains("GUILayout.Label")
+                || line.Contains("new GUIContent(") || line.Contains("SectionHeader(")
+                || line.Contains("RenderHelpHeader(");
+        }
+        #endregion
+
+
+        #region "Case 12 -- the system inspector does not edit the scene while it draws (B-6)"
+        /// <summary> B-6. Six faults in one inspector, five of which can be stated as a rule about the source and are.
+        ///
+        /// The one worth the most: `OnInspectorGUI` used to CALL `roadSystem.EditorCameraSetSingle()`, which searched
+        /// the scene for its only camera and wrote the result into a serialised field of a scene component. Selecting
+        /// the object was therefore an edit -- no undo step, no dirty flag the author had asked for, and a value that
+        /// reappeared every repaint after being cleared on purpose. The pick is a button now, in
+        /// `LegacyInspectorShell.CameraField`, and both component-side setters were deleted rather than left
+        /// zero-caller, so this case proves the spelling is gone from the runtime scripts as well as from the editor
+        /// ones. It is checked on code lines, which is what lets the two tombstone comments explaining the removal keep
+        /// naming the method they removed.
+        ///
+        /// The rest are the faults that made the file read as several unrelated tools: a widget whose current value
+        /// came off the component while its new value went through the serialised property (so an undo restored the
+        /// property and the widget went on showing the field); command buttons at three hard-coded widths in two
+        /// styles; and a warning sentence that existed byte for byte in a second inspector. Each is now a single line
+        /// of policy -- no field read on a drawing line, no numeric width, one shared warning -- and each is stated
+        /// here so that the next person to add a control to this file finds the rule before the reviewer does.
+        ///
+        /// The last check is the general form of the fault nobody would have found by reading a diff: `Flip camera Y`
+        /// wrote a field that NOTHING read, so the control had no effect whatever and looked exactly like one that
+        /// did. Every field this inspector declares must be read somewhere and not merely assigned -- where "read"
+        /// deliberately excludes the left-hand side of its own assignment, because that is precisely how a dead control
+        /// disguises itself. </summary>
+        private static void CaseTheSystemInspectorDoesNotEditWhileItDraws(StringBuilder builder, List<string> failures)
+        {
+            string[] lines = CodeLines(SystemFile, failures);
+            if (lines.Length < 1) { return; }
+
+            ToolWideSpellings(failures);
+            SystemInspectorDrawingLines(lines, failures);
+            EverySystemInspectorFieldIsRead(lines, failures);
+
+            Expect(!Contains(lines, "SceneView.lastActiveSceneView"),
+                "system: " + SystemFile + " reaches SceneView.lastActiveSceneView directly; it is null in a scene with "
+                + "no scene view -- a maximised game view, or batch mode -- so use EngineIntegration, which guards it",
+                failures);
+            Expect(Contains(lines, "Undo.RecordObjects("),
+                "system: " + SystemFile + " no longer records an undo step for the roads it writes a build option "
+                + "into; ticking one option on a forty-road system has to be one Ctrl+Z, not none",
+                failures);
+            Expect(Contains(lines, "LegacyInspectorShell.SavingMeshesWarning("),
+                "system: " + SystemFile + " draws its own copy of the saving-meshes warning again", failures);
+
+            builder.Append("RCMLEGACYUI ").Append("system-draws-only".PadRight(24))
+                   .Append("the system inspector draws without editing (").Append(lines.Length).Append(" lines)\n");
+        }
+
+
+        /// <summary> The two spellings whose whole point is that they exist in ONE place, checked across every script of
+        /// the tool rather than across the editor folder: the camera setter this task deleted lived on the runtime
+        /// components, and the warning sentence has to be absent from the two inspectors that used to hold a copy each.
+        /// </summary>
+        private static void ToolWideSpellings(List<string> failures)
+        {
+            string editorFolder = InspectorConsistencyDocWriter.EditorScriptFolder();
+            DirectoryInfo scripts = Directory.GetParent(editorFolder);
+            if (scripts == null || !scripts.Exists)
+            {
+                failures.Add("system: '" + editorFolder + "' has no parent script folder, so the tool-wide spellings "
+                    + "could not be checked (setup)");
+                return;
+            }
+
+            string[] sources = Directory.GetFiles(scripts.FullName, "*.cs", SearchOption.AllDirectories);
+            int warningCopies = 0;
+            for (int s = 0; s < sources.Length; s++)
+            {
+                string[] code = CodeLinesAt(sources[s], failures);
+                string name = Path.GetFileName(sources[s]);
+                for (int i = 0; i < code.Length; i++)
+                {
+                    if (MentionsIdentifier(code[i], DeletedCameraSetter))
+                    {
+                        failures.Add("system: " + name + ":" + (i + 1) + " names " + DeletedCameraSetter
+                            + "; that setter filled a scene component's camera field from a repaint, and its "
+                            + "replacement is the author-pressed button in LegacyInspectorShell.CameraField");
+                    }
+                }
+                if (Contains(code, SavingMeshesSentence)) { warningCopies++; }
+            }
+
+            Expect(warningCopies == 1,
+                "system: the saving-meshes warning is written out in " + warningCopies + " files; it belongs to "
+                + "LegacyInspectorShell.SavingMeshesWarning alone, so the two inspectors that offer the option cannot "
+                + "drift into warning about it differently",
+                failures);
+        }
+        /// <summary> The lines of the system inspector that draw something, judged on what they read and how wide they
+        /// are. A drawing line may not take its value off the component -- <c>roadSystem.something</c> with no bracket
+        /// after it is a field or property read, where <c>roadSystem.AddRoad(true)</c> is a command and is fine -- and
+        /// no line in the file may hard-code a control width. </summary>
+        private static void SystemInspectorDrawingLines(string[] lines, List<string> failures)
+        {
+            int drawn = 0;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (Regex.IsMatch(lines[i], @"GUILayout\.Width\(\s*[0-9]"))
+                {
+                    failures.Add("system: " + SystemFile + ":" + (i + 1) + " hard-codes a control width; every command "
+                        + "button in this file is LegacyInspectorShell.CommandButtonWidth wide, which is what stops one "
+                        + "row of buttons reading as four unrelated things");
+                }
+                if (!DrawsALabelledControl(lines[i])) { continue; }
+                drawn++;
+
+                foreach (Match m in Regex.Matches(lines[i], @"roadSystem\.([A-Za-z_][A-Za-z0-9_]*)\s*(\()?"))
+                {
+                    if (m.Groups[2].Success) { continue; }
+                    failures.Add("system: " + SystemFile + ":" + (i + 1) + " draws a control whose value is read off "
+                        + "the component (roadSystem." + m.Groups[1].Value + "); read the serialized property instead, "
+                        + "or an undo restores the property while the control goes on showing the field");
+                }
+            }
+            Expect(drawn > 0,
+                "system: no drawing line was found in " + SystemFile + " at all, so nothing was checked (setup)",
+                failures);
+        }
+
+
+        /// <summary> Every field this inspector declares is read somewhere, and not merely written.
+        ///
+        /// The left-hand side of the field's own assignment does not count, which is the whole point: a control written
+        /// as <c>myField = EditorGUILayout.Toggle(…)</c> and read by nothing is a control with no effect, and that is
+        /// exactly what `Flip camera Y` was for as long as this file has existed. A compound assignment
+        /// (<c>index += 1</c>) does read the field and is counted, and so is an assignment that mentions the field on
+        /// its right-hand side. </summary>
+        private static void EverySystemInspectorFieldIsRead(string[] lines, List<string> failures)
+        {
+            int checkedFields = 0;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                Match declaration = Regex.Match(lines[i],
+                    @"^\s*private\s+(?:static\s+)?[A-Za-z_][A-Za-z0-9_<>,\.\[\]\s]*?\s([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)");
+                if (!declaration.Success) { continue; }
+
+                string field = declaration.Groups[1].Value;
+                checkedFields++;
+                Expect(IsReadSomewhere(lines, field, i),
+                    "system: " + SystemFile + ":" + (i + 1) + " declares '" + field + "', which nothing in the file "
+                    + "ever reads; a control that writes a field no code asks about does nothing at all, and looks "
+                    + "exactly like one that works",
+                    failures);
+            }
+            Expect(checkedFields > 0,
+                "system: no field declaration was found in " + SystemFile + ", so nothing was checked (setup)",
+                failures);
+        }
+        /// <summary> Whether <paramref name="field"/> is read anywhere but its own declaration. </summary>
+        private static bool IsReadSomewhere(string[] lines, string field, int declaredAt)
+        {
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (i == declaredAt) { continue; }
+                if (!MentionsIdentifier(lines[i], field)) { continue; }
+
+                string trimmed = lines[i].TrimStart();
+                if (trimmed.StartsWith(field, System.StringComparison.Ordinal))
+                {
+                    string rest = trimmed.Substring(field.Length).TrimStart();
+                    bool isPlainAssignment = rest.StartsWith("=", System.StringComparison.Ordinal)
+                        && !rest.StartsWith("==", System.StringComparison.Ordinal);
+                    // `f = g;` writes and does not read. `f = h(f);` does both, and so does `f += 1`.
+                    if (isPlainAssignment && !MentionsIdentifier(rest.Substring(1), field)) { continue; }
+                }
+                return true;
+            }
+            return false;
+        }
+
+
+        /// <summary> Whether any of these code lines contains this text. </summary>
+        private static bool Contains(string[] lines, string text)
+        {
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].IndexOf(text, System.StringComparison.Ordinal) >= 0) { return true; }
+            }
+            return false;
+        }
+        #endregion
+
+
         #region "Reading a source file the way a compiler would, not the way grep does"
         /// <summary> One source file of the editor folder, with its comments blanked.
         ///
@@ -916,7 +1287,21 @@ namespace RoadCityMaster
         /// names its own file and line, never a missed fault. </summary>
         private static string[] CodeLines(string file, List<string> failures)
         {
-            string path = Path.Combine(InspectorConsistencyDocWriter.EditorScriptFolder(), file);
+            return CodeLinesAt(Path.Combine(InspectorConsistencyDocWriter.EditorScriptFolder(), file), failures);
+        }
+
+
+        /// <summary> The same reader, addressed by full path. B-6's case has to look at the RUNTIME scripts as well --
+        /// the method it proves is gone lived on `Road` and `RoadSystem` -- and the alternative to this two-line split
+        /// was a second copy of the comment stripper that could disagree with the first about what a comment is.
+        ///
+        /// <c>internal</c> for that same reason, not for this gate's convenience: <see cref="DispositionGate"/> case 6
+        /// has to decide whether a member a performed removal deleted is really gone, and a mention of its name in the
+        /// comment explaining the removal is not a use of it. That is the rule <c>Docs/Disposition.md</c> already
+        /// states -- "comments read as comments and not as references" -- so it reads code through this stripper rather
+        /// than growing a second one that could disagree with it (B-21). </summary>
+        internal static string[] CodeLinesAt(string path, List<string> failures)
+        {
             if (!File.Exists(path))
             {
                 failures.Add("source: '" + path + "' does not exist, so nothing about it could be checked");

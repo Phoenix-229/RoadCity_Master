@@ -68,6 +68,37 @@ namespace RoadCityMaster
         public bool isTunnelEnd = false;
         public bool isTunnelMatched = false;
         public SplineN tunnelCounterpartNode = null;
+
+        /// <summary> B-18. The water level this tunnel passes under, in world metres, or negative infinity for a tunnel
+        /// that passes under ground.
+        ///
+        /// It is STATED rather than measured, and it has to be. The provider surface the terrain reaches the tool
+        /// through carries no water query and no task here may add one (R-5), so a road cannot ask the host whether
+        /// there is a river above a given bore. Negative infinity meaning "no water here" is the convention
+        /// <c>BuildableLandTest</c> and <c>TunnelRunReader</c> already read, so this is the same figure they take and
+        /// not a second way of saying it.
+        ///
+        /// Only the START node's value is read: a tunnel is one run, and a run has one water level. </summary>
+        public float tunnelWaterSurfaceY = float.NegativeInfinity;
+
+        /// <summary> B-18. True when a tunnel under water is built as an immersed tube -- sunk into a dredged trench in
+        /// the bed and backfilled -- rather than bored beneath it.
+        ///
+        /// Stated, never inferred. Which of the two is built is an engineer's decision about the works, not a fact
+        /// about the ground, and the two are judged by different arithmetic: an immersed tube's trench is announced to
+        /// the host as ground that is dug and put back, a bore's span is announced as ground that must not be touched
+        /// at all. Guessing it would silently change which of those the linker asks for. Ignored unless
+        /// <see cref="tunnelWaterSurfaceY"/> puts water above the run. </summary>
+        public bool isTunnelImmersedTube = false;
+
+        /// <summary> B-18. The terrain opening this node's tunnel is holding, on the start node of a matched pair.
+        ///
+        /// Scratch, deliberately: the gateway that granted it is a static that does not survive a domain reload either,
+        /// so a handle that outlived one would name a hold nobody is keeping. The two forget together, which is the
+        /// only arrangement in which "every request has a matching release" stays true across a reload.
+        /// <see cref="TunnelResetValues"/> is the one place it is given back. </summary>
+        [System.NonSerialized]
+        public City.TerrainRequestHandle tunnelOpeningHold;
         #endregion
 
 
@@ -875,6 +906,14 @@ namespace RoadCityMaster
                 {
                     PrevNode = spline.GetPrevLegitimateNode(_iStart);
                 }
+                // B-17. The forward neighbour, which this method has always been written for and never had. Every line
+                // below that mentions NextNode -- the second window, bNextNodeGood, and the combined Min/Max window --
+                // was unreachable while it stayed null, so the grade was only ever held against the node BEHIND this
+                // one. A node dragged or typed down was therefore stopped by the previous node's gradient and then
+                // allowed to break the next node's, which is the half-truth any message about the limit would have
+                // repeated. There is deliberately no forward neighbour in the add-to-end case above: the node being
+                // added IS the end, so there is nothing in front of it yet.
+                NextNode = spline.GetNextLegitimateNode(_iStart == -1 ? idOnSpline : _iStart);
             }
             if (PrevNode == null)
             {
@@ -947,6 +986,64 @@ namespace RoadCityMaster
             }
 
             transform.position = tVect;
+        }
+
+
+        /// <summary> B-17. How high and how low this node is allowed to sit, and the name of the neighbour that decides
+        /// the low end -- a report, not a control. Nothing here moves anything.
+        ///
+        /// The author's complaint is that a node "will not go down". Three separate things stop it, and this answers the
+        /// third: the maximum grade. That clamp is correct road engineering and removing it would be a regression, so
+        /// what B-17 owes the author is the REASON, in words, next to the field they typed in -- otherwise the tool
+        /// silently overrules them and looks broken.
+        ///
+        /// The window is the INTERSECTION of what each neighbour allows, because a node has to be reachable from both.
+        /// <see cref="FilterMaxGradeHeight"/> does the arithmetic, once, on each neighbour in turn; there is no second
+        /// copy of the gradient maths here. Returns false where no limit applies -- no spline, no road, max grade turned
+        /// off, or no legitimate neighbour on either side -- and in that case the node may sit anywhere. </summary>
+        public bool GradeWindow(out float minY, out float maxY, out string limitedBy)
+        {
+            minY = float.NegativeInfinity;
+            maxY = float.PositiveInfinity;
+            limitedBy = string.Empty;
+
+            if (spline == null || spline.road == null || !spline.road.isMaxGradeEnabled)
+            {
+                return false;
+            }
+
+            SplineN previous = spline.GetPrevLegitimateNode(idOnSpline);
+            SplineN next = spline.GetNextLegitimateNode(idOnSpline);
+            if (previous == null && next == null)
+            {
+                return false;
+            }
+
+            Vector3 here = transform.position;
+            float lowest = float.NegativeInfinity;
+            float highest = float.PositiveInfinity;
+            string binding = string.Empty;
+
+            if (previous != null)
+            {
+                float low, high;
+                previous.FilterMaxGradeHeight(here, out low, out high);
+                lowest = low;
+                highest = high;
+                binding = previous.name;
+            }
+            if (next != null)
+            {
+                float low, high;
+                next.FilterMaxGradeHeight(here, out low, out high);
+                if (low > lowest) { lowest = low; binding = next.name; }
+                if (high < highest) { highest = high; }
+            }
+
+            minY = lowest;
+            maxY = highest;
+            limitedBy = binding;
+            return true;
         }
         #endregion
 
@@ -1725,6 +1822,13 @@ namespace RoadCityMaster
 
         public void TunnelResetValues()
         {
+            // B-18. Give the hole back before forgetting the tunnel that asked for it. This is the release half of
+            // TerrainWriteGateway's every-request-has-a-release contract, and it is here rather than in the inspector
+            // because this is the one method both portals of a destroyed pair pass through -- TunnelDestroy calls it on
+            // the counterpart and on itself. An end node never holds a handle, so its call is a no-op, and the gateway
+            // refuses an invalid handle rather than mistaking it for hold zero.
+            ReleaseTunnelOpening();
+
             isTunnel = false;
             isTunnelStart = false;
             isTunnelEnd = false;
@@ -1733,25 +1837,70 @@ namespace RoadCityMaster
         }
 
 
+        /// <summary> B-18. Fill this node's tunnel opening back in, if it is holding one. Safe to call when it is not.
+        ///
+        /// Nothing is logged when there is no hold: the great majority of calls come from a node that never had one,
+        /// and a message for each would bury the case that matters. </summary>
+        public void ReleaseTunnelOpening()
+        {
+            if (!tunnelOpeningHold.IsValid) { return; }
+            City.TerrainWriteGateway gateway = City.TerrainWriteGateway.Active;
+            if (gateway != null) { gateway.ReleaseTunnelOpening(tunnelOpeningHold); }
+            tunnelOpeningHold = City.TerrainRequestHandle.None;
+        }
+
+
         public bool CanTunnelStart()
         {
+            string refusal;
+            return CanTunnelStart(out refusal);
+        }
+
+
+        /// <summary> B-18. The same answer, with the reason it is no.
+        ///
+        /// The predicate itself is unchanged and is not copied: the bool form above calls this one, so a control that
+        /// only needs yes-or-no and a control that has to explain itself can never disagree. The inspector had no way
+        /// to author a tunnel at all, and a toggle that simply is not drawn tells an author nothing about why -- which
+        /// is the same complaint B-9 records about every other silent control in this tool. </summary>
+        public bool CanTunnelStart(out string _refusal)
+        {
+            _refusal = "";
             if (isTunnelStart)
             {
                 return true;
             }
             if (isTunnelEnd)
             {
+                _refusal = "This node already ends a tunnel. One node cannot be both portals of the same bore.";
+                return false;
+            }
+            if (isBridgeStart)
+            {
+                // B-18. Not a taste rule and not a guess: SplineC builds a TunnelParams entry only for a start node
+                // that is NOT also a bridge start, so a node carrying both produces no tunnel span at all -- no mesh,
+                // no cover check, no terrain opening -- and says nothing about it. Refusing it here is the only place
+                // an author finds out before the tunnel quietly does not exist.
+                _refusal = "This node already starts a bridge, and a node cannot start both. The spline records only"
+                    + " the bridge, so the tunnel would silently do nothing. Switch the bridge off first, or start the"
+                    + " tunnel at another node.";
                 return false;
             }
             if (isEndPoint)
             {
+                _refusal = "A tunnel cannot start at the road's end node: a portal needs carriageway on both sides"
+                    + " of it. Start the tunnel at an inner node.";
                 return false;
             }
 
             // RM-109. The tunnel predicates carried the identical defect to the bridge ones -- an unbounded cached index
             // read from a repaint -- and were fixed with it rather than left as the next report.
             int nodeIndex = NodeIndex();
-            if (nodeIndex < 0) { return false; }
+            if (nodeIndex < 0)
+            {
+                _refusal = "This node is not on its spline's node list, so its neighbours cannot be read.";
+                return false;
+            }
             int mCount = spline.nodes.Count;
             SplineN neighbour = null;
 
@@ -1760,6 +1909,8 @@ namespace RoadCityMaster
                 neighbour = spline.nodes[nodeIndex - 1];
                 if (neighbour != null && neighbour.isTunnelStart)
                 {
+                    _refusal = "The node behind this one already starts a tunnel. Two portals cannot share a segment;"
+                        + " end that tunnel first, or move this node further along.";
                     return false;
                 }
             }
@@ -1769,6 +1920,8 @@ namespace RoadCityMaster
                 neighbour = spline.nodes[nodeIndex + 1];
                 if (neighbour != null && neighbour.isTunnelStart)
                 {
+                    _refusal = "The node ahead of this one already starts a tunnel. Two portals cannot share a"
+                        + " segment; end that tunnel first, or move this node further back.";
                     return false;
                 }
 
@@ -1776,6 +1929,7 @@ namespace RoadCityMaster
                 {
                     if ((mCount - 3 > 0) && nodeIndex == mCount - 3)
                     {
+                        _refusal = TunnelTooCloseToRoadEnd();
                         return false;
                     }
                 }
@@ -1783,6 +1937,7 @@ namespace RoadCityMaster
                 {
                     if ((mCount - 2 > 0) && nodeIndex == mCount - 2)
                     {
+                        _refusal = TunnelTooCloseToRoadEnd();
                         return false;
                     }
                 }
@@ -1790,6 +1945,8 @@ namespace RoadCityMaster
 
             if (spline.IsInTunnel(time))
             {
+                _refusal = "This node is inside a tunnel already. A bore cannot start inside another one -- end the"
+                    + " one it is in first.";
                 return false;
             }
 
@@ -1797,23 +1954,49 @@ namespace RoadCityMaster
         }
 
 
+        /// <summary> B-18. One wording for the one geometric reason a start is refused twice above, so the special
+        /// start-control-node case and the ordinary case cannot drift into two explanations of the same thing. </summary>
+        private static string TunnelTooCloseToRoadEnd()
+        {
+            return "This node is the last one before the road ends, so there is nowhere for the tunnel to come out."
+                + " A tunnel needs a node after its start to be its exit portal.";
+        }
+
+
         public bool CanTunnelEnd()
         {
+            string refusal;
+            return CanTunnelEnd(out refusal);
+        }
+
+
+        /// <summary> B-18. The end portal's answer with its reason, on the same terms as
+        /// <see cref="CanTunnelStart(out string)"/>. </summary>
+        public bool CanTunnelEnd(out string _refusal)
+        {
+            _refusal = "";
             if (isTunnelEnd)
             {
                 return true;
             }
             if (isTunnelStart)
             {
+                _refusal = "This node already starts a tunnel. One node cannot be both portals of the same bore.";
                 return false;
             }
             if (isEndPoint)
             {
+                _refusal = "A tunnel cannot end at the road's end node: a portal needs carriageway on both sides of"
+                    + " it. End the tunnel at an inner node.";
                 return false;
             }
 
             int nodeIndex = NodeIndex();
-            if (nodeIndex < 0) { return false; }
+            if (nodeIndex < 0)
+            {
+                _refusal = "This node is not on its spline's node list, so its neighbours cannot be read.";
+                return false;
+            }
             int nodeCount = spline.nodes.Count;
 
             if (nodeIndex < (nodeCount - 1))
@@ -1822,6 +2005,7 @@ namespace RoadCityMaster
                 {
                     if (nodeIndex == 2)
                     {
+                        _refusal = TunnelTooCloseToRoadStart();
                         return false;
                     }
                 }
@@ -1829,6 +2013,7 @@ namespace RoadCityMaster
                 {
                     if (nodeIndex == 1)
                     {
+                        _refusal = TunnelTooCloseToRoadStart();
                         return false;
                     }
                 }
@@ -1845,12 +2030,26 @@ namespace RoadCityMaster
                     }
                     else
                     {
+                        _refusal = "The tunnel that starts behind this node already has its exit portal. Move that"
+                            + " end, or start a second tunnel after it.";
                         return false;
                     }
                 }
             }
 
+            _refusal = "No tunnel has been started before this node. A tunnel is authored as a pair: switch on"
+                + " \"Tunnel start\" at an earlier node first, then end it here.";
             return false;
+        }
+
+
+        /// <summary> B-18. The mirror of <see cref="TunnelTooCloseToRoadEnd"/>: one wording for the one geometric reason
+        /// an END is refused twice above, so the special start-control-node case and the ordinary case cannot drift into
+        /// two explanations of the same thing. </summary>
+        private static string TunnelTooCloseToRoadStart()
+        {
+            return "This node is the first one after the road begins, so there is nowhere for the tunnel to have"
+                + " started. A tunnel needs a node before its end to be its entry portal.";
         }
         #endregion
 

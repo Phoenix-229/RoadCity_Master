@@ -17,9 +17,9 @@ namespace RoadCityMaster
     /// every search that could run did run and none of them found a reference; anything a search DID find is never
     /// marked remove, and a claimed reference must point at a real location; every <c>wire up</c> names the task that
     /// does the wiring; every reason is a judgement rather than a hedge; every item the register names still EXISTS on
-    /// disk, so the list describes the tree as it is and no deletion happened quietly; all three dispositions are used;
-    /// the table is well formed; and <c>Docs/Disposition.md</c> still matches the register. Report lines are prefixed
-    /// RCMDEAD.
+    /// disk unless its removal has been carried out, in which case what was removed must be GONE and only a removal may
+    /// claim to have been carried out at all; all three dispositions are used; the table is well formed; and
+    /// <c>Docs/Disposition.md</c> still matches the register. Report lines are prefixed RCMDEAD.
     ///
     /// What it does NOT prove: that a removal, once performed, breaks nothing. That is what the compile and the suite
     /// prove, one disposition group at a time, which is why the removals are a separate change and not this pass.
@@ -213,23 +213,93 @@ namespace RoadCityMaster
         }
 
         /// <summary> Case 6. The register describes the tree AS IT IS. Every item it names -- including every one
-        /// marked for removal -- must still be on disk, because a disposition list is a decision record and the
-        /// removals are a separate, revertible change. A missing file means something was deleted without the compile
-        /// and suite run that has to follow it. </summary>
+        /// marked for removal but not yet carried out -- must still be on disk, because a disposition list is a
+        /// decision record and the removals are a separate, revertible change. A missing file means something was
+        /// deleted without the compile and suite run that has to follow it.
+        ///
+        /// Once a removal HAS been carried out the same case runs the other way round, which is the point of recording
+        /// who carried it out. A performed type or asset removal must leave no file behind. A performed field or method
+        /// removal must leave the file -- deleting a member is not licence to delete its file -- and must leave no live
+        /// line naming the member, read through the one comment stripper the module owns, because the comment that
+        /// explains a removal names what it removed and that is not a use of it. Only a <c>remove</c> may be marked
+        /// performed at all: a keep or a wire-up that claims to have been carried out is a contradiction, and this is
+        /// where it is caught (B-21). </summary>
         private static void CaseEveryItemStillExists(StringBuilder builder, List<string> failures)
         {
             string root = DispositionDocWriter.ToolRoot();
             int found = 0;
+            int performed = 0;
             foreach (DispositionEntry d in DispositionRegister.All())
             {
                 string full = Path.Combine(root, d.path.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(full)) { found++; continue; }
-                failures.Add("case6: '" + d.item + "' names '" + d.path + "', which is not on disk at '" + full + "'");
+
+                if (!d.Performed)
+                {
+                    if (File.Exists(full)) { found++; continue; }
+                    failures.Add("case6: '" + d.item + "' names '" + d.path + "', which is not on disk at '" + full
+                        + "'");
+                    continue;
+                }
+
+                performed++;
+                Expect(d.disposition == Disposition.Remove,
+                    "case6: '" + d.item + "' says it was carried out by " + d.performedBy + ", but it is marked "
+                    + DispositionRegister.DispositionText(d.disposition) + " -- only a removal can be performed",
+                    failures);
+
+                if (d.kind == ItemKind.Type || d.kind == ItemKind.Asset)
+                {
+                    Expect(!File.Exists(full),
+                        "case6: '" + d.item + "' records a removal performed by " + d.performedBy + ", and '" + d.path
+                        + "' is still on disk", failures);
+                    continue;
+                }
+
+                if (!File.Exists(full))
+                {
+                    failures.Add("case6: '" + d.item + "' records a performed member removal, but its file '" + d.path
+                        + "' is gone -- removing a field or a method is not licence to remove the file holding it");
+                    continue;
+                }
+
+                found++;
+                string member = MemberOf(d.item);
+                if (member.Length == 0)
+                {
+                    failures.Add("case6: '" + d.item + "' is a performed " + DispositionRegister.KindText(d.kind)
+                        + " removal, but its name carries no member to look for; write it as Type.member");
+                    continue;
+                }
+
+                Expect(!NamesMember(full, member, failures),
+                    "case6: '" + d.item + "' records a removal performed by " + d.performedBy + ", and a live line of '"
+                    + d.path + "' still names '" + member + "'", failures);
             }
 
             builder.Append("RCMDEAD case6 ").Append(found)
                    .Append(" of ").Append(DispositionRegister.All().Count)
-                   .Append(" named files present; nothing has been deleted ahead of its own change\n");
+                   .Append(" named files present; ").Append(performed)
+                   .Append(" removals carried out, each one gone from the tree it names\n");
+        }
+
+        /// <summary> The member half of a <c>Type.member</c> item name, or empty when the name has no dot. </summary>
+        private static string MemberOf(string item)
+        {
+            int dot = item.LastIndexOf('.');
+            if (dot < 0 || dot == item.Length - 1) { return string.Empty; }
+            return item.Substring(dot + 1);
+        }
+
+        /// <summary> True when a LIVE line of the file names the member. Comments are read as comments, through
+        /// <see cref="LegacyInspectorGate"/>'s stripper rather than a second copy of it, because the rule
+        /// <c>Docs/Disposition.md</c> states for the code search is the rule this check needs. </summary>
+        private static bool NamesMember(string path, string member, List<string> failures)
+        {
+            foreach (string line in LegacyInspectorGate.CodeLinesAt(path, failures))
+            {
+                if (line.IndexOf(member, System.StringComparison.Ordinal) >= 0) { return true; }
+            }
+            return false;
         }
 
         /// <summary> Case 7. All three dispositions are in use. A list that is all keeps is a pass that flinched; a

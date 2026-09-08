@@ -53,12 +53,29 @@ namespace RoadCityMaster
         public readonly Disposition disposition;
         public readonly string reason;
 
+        /// <summary> The task that CARRIED OUT this disposition, or null while it is only recorded. One string rather
+        /// than a bool beside it, because "performed by nobody" is not a state a decision record should be able to
+        /// hold. Only a <c>Remove</c> may name one; <see cref="DispositionGate"/> case 6 asserts that, and asserts the
+        /// tree agrees -- a performed removal's member must be GONE from the file that used to hold it. </summary>
+        public readonly string performedBy;
+
         public DispositionEntry(string item, ItemKind kind, string path,
             SearchOutcome code, string codeEvidence,
             SearchOutcome scenePrefab, string scenePrefabEvidence,
             SearchOutcome serialised, string serialisedEvidence,
             SearchOutcome stringOrName, string stringEvidence,
             Disposition disposition, string reason)
+            : this(item, kind, path, code, codeEvidence, scenePrefab, scenePrefabEvidence, serialised,
+                serialisedEvidence, stringOrName, stringEvidence, disposition, reason, null)
+        {
+        }
+
+        public DispositionEntry(string item, ItemKind kind, string path,
+            SearchOutcome code, string codeEvidence,
+            SearchOutcome scenePrefab, string scenePrefabEvidence,
+            SearchOutcome serialised, string serialisedEvidence,
+            SearchOutcome stringOrName, string stringEvidence,
+            Disposition disposition, string reason, string performedBy)
         {
             this.item = item;
             this.kind = kind;
@@ -73,6 +90,13 @@ namespace RoadCityMaster
             this.stringEvidence = stringEvidence;
             this.disposition = disposition;
             this.reason = reason;
+            this.performedBy = performedBy;
+        }
+
+        /// <summary> True once the removal has actually been carried out in the tree. </summary>
+        public bool Performed
+        {
+            get { return !string.IsNullOrEmpty(performedBy); }
         }
 
         /// <summary> True when no search found a reference. A <c>NotApplicable</c> is neither a hit nor a miss. </summary>
@@ -116,8 +140,10 @@ namespace RoadCityMaster
     /// itself. Meanwhile RM-29's sidewalk is the opposite mistake waiting to happen: present, unreferenced by code, and
     /// a feature an author would ask for -- so the disposition is to wire it up, not to delete it.
     ///
-    /// This register RECORDS decisions; it does not perform them. The removals are a separate, revertible change per
-    /// disposition group, which is why <see cref="DispositionGate"/> asserts every named path still exists. </summary>
+    /// This register RECORDS decisions, and records which of them have been CARRIED OUT: <c>performedBy</c> names the
+    /// task that did it, and nothing else in the register moves when it is set. The removals stay a separate, revertible
+    /// change per disposition group, which is why <see cref="DispositionGate"/> asserts that every named path still
+    /// exists -- and, for the ones already carried out, that what was removed is really gone. </summary>
     public static class DispositionRegister
     {
         private static List<DispositionEntry> _entries;
@@ -230,10 +256,11 @@ namespace RoadCityMaster
 
             e.Add(new DispositionEntry("RoadCityMaster.RigidBody", ItemKind.Type, "Scripts/RigidBody.cs",
                 SearchOutcome.Referenced,
-                "HIT: `Scripts/IntersectionObjects.cs:479`, `_obj.AddComponent<RoadCityMaster.RigidBody>()` -- added "
+                "HIT: `Scripts/IntersectionObjects.cs:499`, `_obj.AddComponent<RoadCityMaster.RigidBody>()` -- added "
                 + "at build time, so no field and no inspector names the type",
                 SearchOutcome.NoReference,
-                "no prefab or scene carries the component; it is only ever added in code",
+                "no prefab or scene carries the component; it is only ever added in code. B-21 re-ran this by GUID: "
+                + "`2759b1170f87beb4ebaadcee989329b7` has zero hits in any `.prefab`, `.unity` or `.asset`",
                 SearchOutcome.NoReference,
                 "no serialised asset names it",
                 SearchOutcome.NoReference,
@@ -241,23 +268,27 @@ namespace RoadCityMaster
                 Disposition.KeepWithReason,
                 "Live, but only just: its whole remaining behaviour is `Awake()` destroying the `Rigidbody` on the same "
                 + "object. That is worth a comment rather than a deletion, because the removal it performs is what "
-                + "keeps dropped intersection objects from falling. RM-102 may fold it into the placer."));
+                + "keeps dropped intersection objects from falling -- B-21 wrote that comment while performing the "
+                + "removal recorded in the row below. RM-102 may fold it into the placer."));
 
             e.Add(new DispositionEntry("RigidBody.minCollisionVelocity", ItemKind.Field, "Scripts/RigidBody.cs",
                 SearchOutcome.NoReference,
-                "the only read is `Scripts/RigidBody.cs:33`, which is INSIDE the commented-out block spanning lines "
-                + "22 to 77; no live line reads it",
+                "the only read was `Scripts/RigidBody.cs:33`, INSIDE the commented-out block that spanned lines 23 to "
+                + "79; no live line read it. Both are gone: the field and that block were removed together",
                 SearchOutcome.NoReference,
-                "no `.prefab`, `.unity` or `.asset` under `Assets/` serialises `minCollisionVelocity`, so no saved "
-                + "value would be lost",
+                "no `.prefab`, `.unity` or `.asset` under `Assets/` serialised `minCollisionVelocity`, so no saved "
+                + "value was lost -- B-21 re-ran this search by field name before deleting, and it returned nothing",
                 SearchOutcome.NoReference,
                 "no serialised library names it",
                 SearchOutcome.NoReference,
                 "no string names it; it is not read through `SerializedObject.FindProperty` either",
                 Disposition.Remove,
-                "Scaffolding, not an unfinished feature: the abandoned collision-sleep experiment that reads it is "
+                "Scaffolding, not an unfinished feature: the abandoned collision-sleep experiment that read it was "
                 + "commented out above it. The field and that block are ONE disposition group -- removing the field "
-                + "alone would leave a comment referring to something that no longer exists."));
+                + "alone would have left a comment referring to something that no longer exists -- so both went in one "
+                + "edit, together with the two commented `isForcedSleeping` and `isIgnoringRigidBody` declarations that "
+                + "only that block read. `Scripts/RigidBody.cs` stays: the TYPE is live, as the row above records.",
+                "B-21"));
 
             e.Add(new DispositionEntry("Navigation.InitResetNavigationData", ItemKind.Method, "Scripts/Navigation.cs",
                 SearchOutcome.Referenced,
@@ -304,23 +335,36 @@ namespace RoadCityMaster
             e.Add(new DispositionEntry("RoadCityMaster.RenderQueue", ItemKind.Type, "Scripts/RenderQueue.cs",
                 SearchOutcome.NoReference,
                 "zero hits outside its own declaration: `\\bRenderQueue\\b` across every `.cs` in the tool returns "
-                + "only `Scripts/RenderQueue.cs` itself, and no constant of it is read anywhere",
+                + "only `Scripts/RenderQueue.cs` itself, and no constant of it is read anywhere. The apparent hit at "
+                + "`Scripts/Editor/MaterialPortRecipes.cs:420` is the serialised key `m_CustomRenderQueue` quoted "
+                + "inside a recipe's evidence, not a use of this type",
                 SearchOutcome.NotApplicable,
                 "a static class of `const int` cannot be serialised",
                 SearchOutcome.NoReference,
                 "no serialised asset names it",
-                SearchOutcome.NoReference,
-                "no material, shader or string names it; queue values are set through `material.renderQueue`",
-                Disposition.Remove,
-                "An abandoned utility carried in from another project, not an unfinished feature of this one: its "
-                + "layers are `ParallaxLayers`, `Tracks`, `Routes` and `IndicatorRings`, which belong to a 2D "
-                + "map-style renderer. Its own comment says setting `material.renderQueue` directly is easier, and "
-                + "that is what RM-68's URP port does. Nothing in the road tool loses a capability."));
+                SearchOutcome.Referenced,
+                "HIT, and B-21 found it by re-running the search rather than trusting this row: the FILE is named as a "
+                + "string literal at `City/Runtime/Licensing/UpstreamProvenance.cs:98`, in the frozen vendor set that "
+                + "`CityUpstreamProvenanceGate` case 1 asserts is on disk exactly once. No material, shader or other "
+                + "string names it; queue values are set through `material.renderQueue`",
+                Disposition.KeepWithReason,
+                "The type is dead and the FILE is load-bearing, which is why this row changed from remove to keep. Its "
+                + "layers are `ParallaxLayers`, `Tracks`, `Routes` and `IndicatorRings`, belonging to a 2D map-style "
+                + "renderer, and its own comment says setting `material.renderQueue` directly is easier -- which is "
+                + "what RM-68's URP port does, so the road tool loses no capability by never calling it. But deleting "
+                + "the file fails `CityUpstreamProvenanceGate` cases 1 and 2 and the written vendor count, and the only "
+                + "way to pass them again is to edit `_vendorFiles`, which is documented as a constant of history "
+                + "rather than a tuning value. Removing a file to keep a licensing record accurate is not a trade this "
+                + "pass may make: the deadness is recorded here instead."));
 
             e.Add(new DispositionEntry("Materials/Concrete2Diffuse.mat", ItemKind.Asset,
                 "Materials/Concrete2Diffuse.mat",
-                SearchOutcome.NoReference,
-                "no `.cs` file names the material",
+                SearchOutcome.Referenced,
+                "HIT three times, found by re-running the search in B-21 rather than trusting the earlier `no .cs file "
+                + "names the material`: `Scripts/Editor/AssetIdentityRegister.cs:320` lists it among the sanctioned "
+                + "identities, `Scripts/Editor/MaterialPortRecipes.cs:249` is recipe R6 and names it as the concrete "
+                + "material the URP port CONVERTED, and `Scripts/Editor/ShaderInventory.cs:233` records it on "
+                + "`fileID: 46` inside the concrete family whose count is asserted as 12",
                 SearchOutcome.NoReference,
                 "GUID `a09bfe33f517abd47820653eeb108e28` has zero hits in any `.prefab` or `.unity` under `Assets/`",
                 SearchOutcome.NoReference,
@@ -329,11 +373,13 @@ namespace RoadCityMaster
                 SearchOutcome.NoReference,
                 "no FBX in the tree contains the literal `Concrete2Diffuse`, so no FBX slot resolves it BY NAME -- the "
                 + "check RM-48 requires before any material may be called orphaned",
-                Disposition.Remove,
-                "The one material that survives all four searches, and it survives the name check RM-48 added as "
-                + "well. `Concrete2.mat` exists beside it and is referenced; this is a leftover duplicate whose name "
-                + "reads like a texture. Removal is deferred to RM-67's shader inventory, which reads every material "
-                + "in the tree anyway and is the cheapest place to be certain."));
+                Disposition.KeepWithReason,
+                "Recorded as a removal deferred to RM-67, and RM-67 is why it is now a keep: the shader inventory did "
+                + "read every material in the tree, and this one was PORTED. Three registers now name it -- a "
+                + "sanctioned identity, a performed conversion recipe, and a family count of 12 -- so deleting the "
+                + "file would falsify a record of work that was actually done, in three places at once, to save one "
+                + "`.mat` on disk. `Concrete2.mat` exists beside it and is referenced; that makes this a duplicate by "
+                + "content, not an orphan, and a duplicate whose port is on the record stays."));
 
             _entries = e;
             return new List<DispositionEntry>(_entries);
@@ -366,6 +412,16 @@ namespace RoadCityMaster
             return OutcomeText(outcome) + " -- " + evidence;
         }
 
+        /// <summary> The Disposition cell: the judgement, and -- once it has been carried out -- the task that carried
+        /// it out. Inside the existing cell rather than a ninth column, so the table stays eight columns wide and
+        /// <see cref="DispositionGate"/> case 8's pipe count is untouched. </summary>
+        public static string DispositionCell(DispositionEntry d)
+        {
+            string cell = "**" + DispositionText(d.disposition) + "**";
+            if (d.Performed) { cell += " (performed, " + d.performedBy + ")"; }
+            return cell;
+        }
+
         /// <summary> The disposition list as the document holds it: one row per item, all four searches in their own
         /// columns so the evidence cannot be summarised away. </summary>
         public static string Table()
@@ -380,7 +436,7 @@ namespace RoadCityMaster
                     + " | " + Cell(d.scenePrefab, d.scenePrefabEvidence)
                     + " | " + Cell(d.serialised, d.serialisedEvidence)
                     + " | " + Cell(d.stringOrName, d.stringEvidence)
-                    + " | **" + DispositionText(d.disposition) + "** | " + d.reason + " |";
+                    + " | " + DispositionCell(d) + " | " + d.reason + " |";
             }
             return t;
         }

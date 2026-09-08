@@ -74,19 +74,31 @@ namespace RoadCityMaster.City.Editor
             return value.ToString("0.####", CultureInfo.InvariantCulture);
         }
 
-        /// <summary> The manifest transcribes every documented row: the count is the 108 rows of § 10.38 across its
-        /// 19 sections, and a spread of named rows -- one per far-apart section -- resolves by its derived id, so a
-        /// dropped or renamed row is caught, not silently missing. </summary>
+        /// <summary> The manifest transcribes every documented row: the count is the 140 rows of § 10.38 as extended by
+        /// B-15 across its 22 sections, and a spread of named rows -- one per far-apart section -- resolves by its
+        /// derived id, so a dropped or renamed row is caught, not silently missing.
+        ///
+        /// B-15 raised the table from 108 rows in 19 sections to 140 in 22. The three new sections are the ones the
+        /// author's "everything a city has, even what I did not say" exposed as missing: parks and open space (with the
+        /// park path they named), squares and the pedestrian realm, and off-carriageway movement. A named row from each
+        /// is asserted below, so the new sections are held to the same standard as the original nineteen. </summary>
         private static void CaseEverySectionAndRowPresent(List<string> failures)
         {
             IReadOnlyList<ManifestCategory> all = PrefabManifest.Categories;
-            Expect(all.Count == 108, "manifest should carry 108 rows; got " + all.Count, failures);
+            Expect(all.Count == 140, "manifest should carry 140 rows; got " + all.Count, failures);
 
             HashSet<string> sections = new HashSet<string>();
             for (int i = 0; i < all.Count; i++) { sections.Add(all[i].section); }
-            Expect(sections.Count == 19, "manifest should span 19 sections; got " + sections.Count, failures);
+            Expect(sections.Count == 22, "manifest should span 22 sections; got " + sections.Count, failures);
 
             ManifestCategory dummy;
+            Expect(PrefabManifest.TryGet("parks-and-open-space/park-path", out dummy),
+                "the park path row must resolve by its derived id -- it is the author's own example of a detail the "
+                + "table was missing, and it is NOT the kerbside footway row.", failures);
+            Expect(PrefabManifest.TryGet("squares-promenades-and-pedestrian-realm/resting-area", out dummy),
+                "the resting-area row must resolve by its derived id.", failures);
+            Expect(PrefabManifest.TryGet("off-carriageway-movement-and-parking/cycle-track", out dummy),
+                "the cycle-track row must resolve by its derived id.", failures);
             Expect(PrefabManifest.TryGet("road-furniture-and-safety/guardrail-run", out dummy),
                 "Guardrail run row is missing from the manifest.", failures);
             Expect(PrefabManifest.TryGet("telecommunications/cell-tower", out dummy),
@@ -162,8 +174,8 @@ namespace RoadCityMaster.City.Editor
                     Expect(!hasTag, all[i].categoryId + " has no variants but carries VariantTag.", failures);
                 }
             }
-            Expect(checkedWithVariants >= 100,
-                "almost every row lists variants; expected 100+, checked " + checkedWithVariants, failures);
+            Expect(checkedWithVariants >= 130,
+                "almost every row lists variants; expected 130+, checked " + checkedWithVariants, failures);
         }
 
         /// <summary> The heart of "the manifest is last": an in-scope category with no content is refused BY NAME.
@@ -174,8 +186,8 @@ namespace RoadCityMaster.City.Editor
         {
             CategoryContentSet set = ScriptableObject.CreateInstance<CategoryContentSet>();
             int added = ManifestInstaller.EnsureAllCategories(set);
-            Expect(added == 108, "EnsureAllCategories should add 108 empty entries; added " + added, failures);
-            Expect(set.Count == 108, "the set should hold 108 categories after install; got " + set.Count,
+            Expect(added == 140, "EnsureAllCategories should add 140 empty entries; added " + added, failures);
+            Expect(set.Count == 140, "the set should hold 140 categories after install; got " + set.Count,
                 failures);
 
             ContentValidationCache cache = new ContentValidationCache();
@@ -229,13 +241,13 @@ namespace RoadCityMaster.City.Editor
         {
             CategoryContentSet set = ScriptableObject.CreateInstance<CategoryContentSet>();
             int added = ManifestInstaller.EnsureAllCategories(set);
-            Expect(added == 108, "EnsureAllCategories should add 108 empty entries; added " + added, failures);
-            Expect(set.Count == 108, "the set should hold 108 categories after install; got " + set.Count,
+            Expect(added == 140, "EnsureAllCategories should add 140 empty entries; added " + added, failures);
+            Expect(set.Count == 140, "the set should hold 140 categories after install; got " + set.Count,
                 failures);
 
             ContentValidationCache cache = new ContentValidationCache();
             List<ManifestCategoryStatus> report = ManifestInstaller.Report(set, cache);
-            Expect(report.Count == 108, "the report should carry one status per row; got " + report.Count, failures);
+            Expect(report.Count == 140, "the report should carry one status per row; got " + report.Count, failures);
 
             int emptyInScope = 0, outOfScopeEmpty = 0, populatedOrPartial = 0;
             for (int i = 0; i < report.Count; i++)
@@ -247,7 +259,7 @@ namespace RoadCityMaster.City.Editor
                     default: populatedOrPartial++; break;
                 }
             }
-            Expect(emptyInScope == 101, "101 in-scope rows should report Empty on a fresh set; got " + emptyInScope,
+            Expect(emptyInScope == 133, "133 in-scope rows should report Empty on a fresh set; got " + emptyInScope,
                 failures);
             Expect(outOfScopeEmpty == 7, "the 7 rail rows should report OutOfScopeEmpty; got " + outOfScopeEmpty,
                 failures);
@@ -299,7 +311,7 @@ namespace RoadCityMaster.City.Editor
 
         /// <summary> C-06 for the manifest: it is pure data, so reading it twice yields byte-identical content in
         /// byte-identical order. A fingerprint of every row (id, section, scope, variant count, metadata bits) built
-        /// twice must match, and must carry all 108 rows. </summary>
+        /// twice must match, and must carry all 140 rows. </summary>
         private static void CaseManifestIsDeterministic(List<string> failures)
         {
             string first = Fingerprint();
@@ -308,7 +320,7 @@ namespace RoadCityMaster.City.Editor
 
             int rows = 0;
             for (int i = 0; i < first.Length; i++) { if (first[i] == '\n') { rows++; } }
-            Expect(rows == 108, "the fingerprint must carry all 108 rows; counted " + rows, failures);
+            Expect(rows == 140, "the fingerprint must carry all 140 rows; counted " + rows, failures);
         }
 
         /// <summary> A stable, order-sensitive digest of the whole manifest, used only by the determinism case. </summary>

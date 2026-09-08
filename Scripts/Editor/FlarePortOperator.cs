@@ -33,7 +33,13 @@ namespace RoadCityMaster
     public static class FlarePortOperator
     {
         private const string Prefix = "RCMFLARE";
-        private const string MenuMint = "Window/Road City Master/Materials/Port the lens flare to URP";
+
+        // Setup, not a `Materials` submenu of its own. RM-108 moved the two URP material-port rows into Setup and left
+        // this one behind, which produced a submenu holding exactly one item -- and its priority, 402, already sat in
+        // the same contiguous run as the two it was separated from (400 and 401), so the split was an oversight rather
+        // than a grouping. Folding it back makes 400/401/402 one run under one heading and removes a submenu the
+        // manual would otherwise have to describe.
+        private const string MenuMint = "Window/Road City Master/Setup/Port the lens flare to URP";
 
         [MenuItem(MenuMint, false, 402)]
         public static void MintFromMenu()

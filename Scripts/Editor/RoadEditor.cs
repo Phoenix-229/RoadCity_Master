@@ -28,6 +28,7 @@ namespace RoadCityMaster
         private SerializedProperty laneWidth;
         private SerializedProperty isShouldersEnabled;
         private SerializedProperty shoulderWidth;
+        private SerializedProperty shoulderCrossSlope;
         private SerializedProperty isUsingDefaultMaterials;
         private SerializedProperty isMaxGradeEnabled;
         private SerializedProperty maxGrade;
@@ -48,12 +49,18 @@ namespace RoadCityMaster
         private SerializedProperty isDynamicCutsEnabled;
         private SerializedProperty isShoulderCutsEnabled;
         private SerializedProperty isEditorCameraRotated;
+        /// <summary> B-6, fault 1. The camera field was written straight onto the component -- both by the object field
+        /// and by a repaint-time auto-pick -- so neither could be undone. It goes through the property now, and
+        /// <see cref="isCameraPickFailed"/> is what lets the shared control say that a scene with two cameras has no
+        /// obvious one, instead of silently trying again next repaint. </summary>
+        private SerializedProperty editorPlayCamera;
+        private bool isCameraPickFailed = false;
+
         private SerializedProperty editorCameraMetersPerSecond;
         private SerializedProperty isUsingMeshColliders;
         private SerializedProperty roadMaterialDropdown;
         private SerializedProperty isStatic;
         private SerializedProperty isLightmapped;
-        private SerializedProperty desiredRampHeight;
 
         private SerializedProperty roadMaterial1;
         private SerializedProperty roadMaterial2;
@@ -89,11 +96,11 @@ namespace RoadCityMaster
         /// <summary> RM-102. The registry fields this inspector draws at its own position rather than letting the
         /// foldouts draw them, and therefore the ones the foldouts must leave alone -- otherwise one value would sit
         /// under two controls in the same inspector. Lane width belongs beside the road-width readout it feeds;
-        /// shoulder width and max grade belong beside the toggles that decide whether they apply; the terrain match
-        /// drop belongs in the terrain box with the rest of the terrain controls. </summary>
+        /// shoulder width and its cross-fall and max grade belong beside the toggles that decide whether they apply;
+        /// the terrain match drop belongs in the terrain box with the rest of the terrain controls. </summary>
         private static readonly string[] drawnInPlace = new string[]
         {
-            "laneWidth", "shoulderWidth", "maxGrade", "matchTerrainSubtraction"
+            "laneWidth", "shoulderWidth", "shoulderCrossSlope", "maxGrade", "matchTerrainSubtraction"
         };
 
         /// <summary> The reset-to-default icon buttons, held as delegates rather than built on each call: an inspector
@@ -101,16 +108,18 @@ namespace RoadCityMaster
         /// stutter while dragging. Bound once in <see cref="OnEnable"/>. </summary>
         private System.Action resetLaneWidth;
         private System.Action resetShoulderWidth;
+        private System.Action resetShoulderCrossSlope;
         private System.Action resetMaxGrade;
         private System.Action resetTerrainSubtraction;
 
         private GUIStyle warningLabelStyle;
-        private GUIStyle loadButton = null;
         private GUIStyle imageButton = null;
-        private GUIStyle maybeButton = null;
+        // B-14. Gone from here: `maybeButton`, a button style whose only purpose was to colour the *disarmed* half of
+        // the terrain-history reset pair. That pair is one button in a disabled group now, which Unity greys for
+        // itself, so the style had no site left and its `GUI.skin.button` copy is one fewer skin read per repaint.
         private Texture2D warningLabelBG;
-        private Texture2D loadBtnBG = null;
-        private Texture2D loadBtnBGGlow = null;
+        // B-11. Gone from here: `loadButton` and the two textures it was built from. The branded command-button style is
+        // `LegacyInspectorShell.CommandButtonStyle()`, which is where three other editors' copies of it went too.
         private Texture refreshButtonTexture = null;
         private Texture deleteButtonText = null;
         private Texture refreshButtonTextureReal = null;
@@ -134,6 +143,7 @@ namespace RoadCityMaster
 
             resetLaneWidth = ResetLaneWidth;
             resetShoulderWidth = ResetShoulderWidth;
+            resetShoulderCrossSlope = ResetShoulderCrossSlope;
             resetMaxGrade = ResetMaxGrade;
             resetTerrainSubtraction = ResetTerrainSubtraction;
 
@@ -143,6 +153,7 @@ namespace RoadCityMaster
             laneWidth = serializedObject.FindProperty("laneWidth");
             isShouldersEnabled = serializedObject.FindProperty("isShouldersEnabled");
             shoulderWidth = serializedObject.FindProperty("shoulderWidth");
+            shoulderCrossSlope = serializedObject.FindProperty("shoulderCrossSlope");
             isUsingDefaultMaterials = serializedObject.FindProperty("isUsingDefaultMaterials");
             isMaxGradeEnabled = serializedObject.FindProperty("isMaxGradeEnabled");
             maxGrade = serializedObject.FindProperty("maxGrade");
@@ -163,12 +174,13 @@ namespace RoadCityMaster
             isDynamicCutsEnabled = serializedObject.FindProperty("isDynamicCutsEnabled");
             isShoulderCutsEnabled = serializedObject.FindProperty("isShoulderCutsEnabled");
             isEditorCameraRotated = serializedObject.FindProperty("isEditorCameraRotated");
+            editorPlayCamera = serializedObject.FindProperty("editorPlayCamera");
+
             editorCameraMetersPerSecond = serializedObject.FindProperty("EditorCameraMetersPerSecond");
             isUsingMeshColliders = serializedObject.FindProperty("isUsingMeshColliders");
             roadMaterialDropdown = serializedObject.FindProperty("roadMaterialDropdown");
             isStatic = serializedObject.FindProperty("isStatic");
             isLightmapped = serializedObject.FindProperty("isLightmapped");
-            desiredRampHeight = serializedObject.FindProperty("desiredRampHeight");
 
             roadMaterial1 = serializedObject.FindProperty("RoadMaterial1");
             roadMaterial2 = serializedObject.FindProperty("RoadMaterial2");
@@ -200,8 +212,6 @@ namespace RoadCityMaster
             EditorUtilities.LoadTexture(ref refreshButtonTextureReal, basePath + "/Editor/Icons/refresh.png");
             EditorUtilities.LoadTexture(ref deleteButtonText, basePath + "/Editor/Icons/delete.png");
             EditorUtilities.LoadTexture(ref warningLabelBG, basePath + "/Editor/Icons/WarningLabelBG.png");
-            EditorUtilities.LoadTexture(ref loadBtnBG, basePath + "/Editor/Icons/otherbg.png");
-            EditorUtilities.LoadTexture(ref loadBtnBGGlow, basePath + "/Editor/Icons/otherbg2.png");
 
             if (warningLabelStyle == null)
             {
@@ -224,25 +234,6 @@ namespace RoadCityMaster
                 imageButton.padding = new RectOffset(0, 0, 0, 0);
                 imageButton.normal.background = null;
             }
-
-            if (loadButton == null)
-            {
-                loadButton = new GUIStyle(GUI.skin.button);
-                loadButton.contentOffset = new Vector2(0f, 1f);
-                loadButton.normal.textColor = new Color(1f, 1f, 1f, 1f);
-                loadButton.normal.background = loadBtnBG;
-                loadButton.active.background = loadBtnBGGlow;
-                loadButton.focused.background = loadBtnBGGlow;
-                loadButton.hover.background = loadBtnBGGlow;
-                loadButton.fixedHeight = 16f;
-                loadButton.fixedWidth = 128f;
-            }
-
-            if (maybeButton == null)
-            {
-                maybeButton = new GUIStyle(GUI.skin.button);
-                maybeButton.normal.textColor = new Color(0f, 0f, 0f, 1f);
-            }
         }
 
 
@@ -262,14 +253,24 @@ namespace RoadCityMaster
         /// has to be on the value's own row to read as belonging to it. What changed is only that the value beside them
         /// is now drawn through the registry's drawer, so it carries its unit and its limits.
         ///
-        /// The numbers are the road's own field initialisers, which is why they live here and not in the registry: the
-        /// registry records what a value is ALLOWED to be, from a cited real-world range, and that is a different
-        /// question from what this tool ships as the starting point. </summary>
+        /// RM-110 (B-9) changed WHERE the numbers come from, because two of them had gone stale and were restoring
+        /// values this tool no longer ships: this button wrote 5 m for a lane and 3 m for a shoulder against current
+        /// defaults of 3.25 m and 1 m. RM-109 narrowed the shoulder and nothing brought the button with it, which is
+        /// what a hand-copied constant does eventually. A "reset to default" that restores a non-default is worse than
+        /// no button, because an author has no way to tell it lied to them.
+        ///
+        /// They read <see cref="RoadClassDefaults"/> now -- the register <see cref="Road.ApplyRoadClassDefaults(bool)"/>
+        /// itself reads -- so the button restores exactly what this road's own class would apply, and the two cannot
+        /// drift again because there is only one copy of each number. It also makes the answer correct per road rather
+        /// than per tool: resetting a motorway's grade to 0.08 handed it a ceiling twice its class's own 0.04, which is
+        /// not a default at all. A class the register does not carry returns an incomplete profile, and for that one the
+        /// field initialiser is used rather than the register's zero. </summary>
         private void ResetLaneWidth()
         {
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                laneWidth.floatValue = 5f;
+                RoadClassProfile p = RoadClassDefaults.For(road.roadClass);
+                laneWidth.floatValue = p.Complete ? (float)p.LaneWidthM : 3.25f;
             }
         }
 
@@ -278,7 +279,21 @@ namespace RoadCityMaster
         {
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                shoulderWidth.floatValue = 3f;
+                RoadClassProfile p = RoadClassDefaults.For(road.roadClass);
+                shoulderWidth.floatValue = p.Complete ? (float)p.ShoulderWidthM : 1.2f;
+            }
+        }
+
+
+        /// <summary> RM-110, B-9. The shoulder cross-fall resets to the normal figure for a paved bituminous shoulder,
+        /// not to a per-class number: the register carries no per-class cross-slope, and inventing one would be a
+        /// figure with no source behind it. <see cref="CrossSection.CarriagewaySection.ShoulderCrossSlopeNormal"/> is
+        /// the same constant the geometry falls back to for a zero, so the button and the fallback agree. </summary>
+        private void ResetShoulderCrossSlope()
+        {
+            if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
+            {
+                shoulderCrossSlope.floatValue = (float)CrossSection.CarriagewaySection.ShoulderCrossSlopeNormal;
             }
         }
 
@@ -287,11 +302,14 @@ namespace RoadCityMaster
         {
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
-                maxGrade.floatValue = 0.08f;
+                RoadClassProfile p = RoadClassDefaults.For(road.roadClass);
+                maxGrade.floatValue = p.Complete ? (float)p.MaxGrade : 0.08f;
             }
         }
 
 
+        /// <summary> The terrain match drop keeps a literal because no class register carries it: it is a tool constant,
+        /// not a road-class dimension, and it still matches the field initialiser it was copied from. </summary>
         private void ResetTerrainSubtraction()
         {
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
@@ -338,7 +356,7 @@ namespace RoadCityMaster
             // While this road is building: says so, and keeps every control below enabled. An author is allowed to
             // carry on editing during a build; the edit lands on the data and the queue retires the older build.
             LegacyInspectorShell.BuildLine(road.BuildOwnerId);
-            if (GUILayout.Button("Update road", loadButton))
+            if (GUILayout.Button("Update road", LegacyInspectorShell.CommandButtonStyle()))
             {
                 TriggerRoadUpdate();
             }
@@ -347,8 +365,15 @@ namespace RoadCityMaster
             EditorGUILayout.LabelField("Hold ctrl and click terrain to add nodes.");
             EditorGUILayout.LabelField("Hold shift and click terrain to insert nodes.");
             EditorGUILayout.LabelField("Select nodes on spline to add objects.");
-            EditorGUILayout.LabelField("Road options:");
 
+            // B-5, fault 1. Every one of this inspector's eleven section boundaries was a plain LabelField, drawn at
+            // the same weight as the fields under it and as the computed figures printed among them, so nothing on the
+            // page told an author where one subject ended and the next began. They go through the shell from here on,
+            // which draws one boundary at one weight -- bold, with the same space above it -- and no colon, because a
+            // heading has no control on its right to bind to.
+            LegacyInspectorShell.SectionHeader("Road options",
+                "What this road is and how it is built: its cross-section, the materials it is surfaced with, and the "
+                + "gizmos that help you place its nodes.");
 
             EditorGUILayout.BeginVertical("box");
             // RM-102. The pair of buttons here used to be "Online manual" -- the upstream project's wiki, which is a
@@ -359,10 +384,36 @@ namespace RoadCityMaster
                 RoadCityMaster.EditorUtilities.OpenOfflineManual();
             }
             //Option: Gizmos input:
-            isGizmosEnabled.boolValue = EditorGUILayout.Toggle("Gizmos: ", road.isGizmosEnabled);
-            road.newNodePreviewColor = EditorGUILayout.ColorField("Gizmo new Node preview Color: ", road.newNodePreviewColor);
-            road.selectedColor = EditorGUILayout.ColorField("Gizmo Selected Color: ", road.selectedColor);
-            road.defaultNodeColor = EditorGUILayout.ColorField("Gizmo Default Color: ", road.defaultNodeColor);
+            // B-5, faults 2, 3 and 8, and the pattern for every control below. The colon and the trailing space went:
+            // Unity's own prefix label separates itself from its control, so "Gizmos: " drew as "Gizmos:  " and lined
+            // up with nothing. The casing went with it -- "Gizmo new Node preview Color" capitalised three words of
+            // five while the row above it capitalised one -- and each control now carries the sentence an author reads
+            // on hover, which is the only place a control can say what it DOES without spending a row of the inspector
+            // saying it.
+            //
+            // B-11, and the rule for every control from here to the foot of the file. This inspector edits the road
+            // through `serializedObject`: it reads the properties at :338 and writes them back at :988. So the ONLY
+            // value a control may draw itself from is its own serialized property. Reading `road.<field>` instead --
+            // which every toggle, every greying scope and every cascade gate below used to do -- asks the object what it
+            // held BEFORE the write-back, so the row on screen can disagree with the value being stored for a frame,
+            // and a control gated on another control's raw field lags a click behind the toggle that governs it. B-6
+            // fault 2 fixed the same three lines in `RoadSystemEditor`; this is the rest of them.
+            //
+            // The comparisons in the change-detection block are the deliberate exception and are left alone: reading the
+            // serialized value and the raw field there is how "did the author just move this" is asked, and answering it
+            // needs both the new number and the old one.
+            isGizmosEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Gizmos",
+                "Draw this road's nodes and its spline in the scene view. They are the handles you place and move "
+                + "nodes with, so turning them off makes the road un-editable in the scene until you turn them back on."),
+                isGizmosEnabled.boolValue);
+            road.newNodePreviewColor = EditorGUILayout.ColorField(new GUIContent("Gizmo new node color",
+                "Colour of the preview node that follows the cursor while you hold ctrl over the terrain, before you "
+                + "click to place it."), road.newNodePreviewColor);
+            road.selectedColor = EditorGUILayout.ColorField(new GUIContent("Gizmo selected color",
+                "Colour of the selected node -- the one the scene handles move and the one the node inspector below "
+                + "belongs to."), road.selectedColor);
+            road.defaultNodeColor = EditorGUILayout.ColorField(new GUIContent("Gizmo default color",
+                "Colour of every node on this road that is not selected."), road.defaultNodeColor);
 
             // RM-102. What used to be here was a "Lanes: Two / Four / Six" popup. It went, and the road's own
             // per-direction counts took its place inside the foldout below, for a reason that is about roads and not
@@ -390,15 +441,33 @@ namespace RoadCityMaster
 
             //Option: Lane and road width:
             LegacyInspectorShell.Field(serializedObject, "Road", "laneWidth", fields, resetLaneWidth);
-            EditorGUILayout.LabelField("Road width: " + road.RoadWidth().ToString("F1") + " meters");
+            // B-5, fault 4. The travelled-way width this road works out from its lane width and its lane counts used to
+            // be printed right here as a bare label -- "Road width: 10.0 meters" -- in among the fields an author types
+            // into, which is how a computed figure comes to read as a field that has stopped accepting input. It is
+            // drawn with the inspector's three other measurements now, under the single heading RM-64's policy gives
+            // them, at the foot of this inspector.
 
             //Option: Shoulders enabled:
-            isShouldersEnabled.boolValue = EditorGUILayout.Toggle("Shoulders enabled:", road.isShouldersEnabled);
+            isShouldersEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Shoulders enabled",
+                "Build a shoulder strip along both edges of the running lanes. It widens the road by the shoulder width "
+                + "on each side, and it is the surface a stopped vehicle stands on."), isShouldersEnabled.boolValue);
 
             //Option: Shoulders width:
-            if (road.isShouldersEnabled)
+            // B-5, fault 7. The width used to VANISH when shoulders were switched off, and a control an author cannot
+            // see is a control they cannot learn: the only way to discover that a shoulder has a width of its own was
+            // to turn shoulders on and watch a row appear. Greyed instead, it stays legible with its unit and its band,
+            // and the toggle immediately above it reads as the thing that governs it. The Field call inside the scope
+            // is unchanged to the byte, because LegacyInspectorGate case 2 proves this field is still reachable by
+            // finding this exact call.
+            using (new EditorGUI.DisabledScope(!isShouldersEnabled.boolValue))
             {
                 LegacyInspectorShell.Field(serializedObject, "Road", "shoulderWidth", fields, resetShoulderWidth);
+                // RM-110, B-9. The shoulder's cross-fall, drawn under the width it applies across and inside the same
+                // greying scope, because a shoulder that is switched off has no fall either. It is the control the
+                // author asked for and did not have: the fall has shaped the ramp vertices since RM-94 and the only
+                // slope reaching the geometry was the constant normal, so a shoulder could be widened but never
+                // steepened for drainage nor flattened to meet an existing verge.
+                LegacyInspectorShell.Field(serializedObject, "Road", "shoulderCrossSlope", fields, resetShoulderCrossSlope);
             }
 
             // RM-102. The road definition -- metres of road per generated segment -- moved into the "what is generated
@@ -406,10 +475,21 @@ namespace RoadCityMaster
             // shoulder width and the material dropdown, neither of which it has anything to do with.
 
             //Dropdown:
-            if (road.isUsingDefaultMaterials)
+            // B-5, fault 7 again, with the one wrinkle that makes it worth a comment: what governs this control is
+            // "Use default materials" down in the materials section, not a toggle beside it. So it is drawn always and
+            // greyed when that toggle is off, and its tooltip NAMES the toggle -- a control greyed by something the
+            // author cannot see on the same screen otherwise reads as broken rather than as unavailable. The change
+            // test below cannot fire while the popup is disabled, which is what disabling it means.
+            using (new EditorGUI.DisabledScope(!isUsingDefaultMaterials.boolValue))
             {
-                int Old = (int)road.roadMaterialDropdown;
-                roadMaterialDropdown.enumValueIndex = (int)EditorGUILayout.Popup("Road material: ", (int)road.roadMaterialDropdown, RoadMaterialDropdownEnumDesc, GUILayout.Width(250f));
+                int Old = roadMaterialDropdown.enumValueIndex;
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PrefixLabel(new GUIContent("Road material",
+                    "Which of the tool's own surfacing sets to lay on this road. Available while \"Use default "
+                    + "materials\" in the materials section is on; switch that off to assign your own materials there."));
+                roadMaterialDropdown.enumValueIndex = EditorGUILayout.Popup(roadMaterialDropdown.enumValueIndex,
+                    RoadMaterialDropdownEnumDesc, GUILayout.Width(250f));
+                EditorGUILayout.EndHorizontal();
                 if (roadMaterialDropdown.enumValueIndex != Old)
                 {
                     if (roadMaterialDropdown.enumValueIndex > 0)
@@ -424,10 +504,15 @@ namespace RoadCityMaster
             }
 
             //Option: Max grade enabled:
-            isMaxGradeEnabled.boolValue = EditorGUILayout.Toggle("Max grade enforced: ", road.isMaxGradeEnabled);
+            isMaxGradeEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Max grade enforced",
+                "Hold the centreline to the grade ceiling below while the road is built, lifting or dropping nodes that "
+                + "would breach it. With this off the road follows your nodes however steeply they climb."),
+                isMaxGradeEnabled.boolValue);
 
             //Option: Max grade value:
-            if (road.isMaxGradeEnabled)
+            // B-5, fault 7. Greyed, not hidden, for the same reason as the shoulder width above: the ceiling is part of
+            // what an author needs to know the road HAS, whether or not it is being enforced this minute.
+            using (new EditorGUI.DisabledScope(!isMaxGradeEnabled.boolValue))
             {
                 // RM-102. This was a 0–1 slider, which let an author set a 100% grade -- a 45° road -- and said
                 // nothing about it. Through the drawer it is a fraction with AASHTO's 6–12% working band and a 15%
@@ -436,20 +521,38 @@ namespace RoadCityMaster
             }
 
             //Mesh colliders:
-            isUsingMeshColliders.boolValue = EditorGUILayout.Toggle("Use mesh colliders: ", road.isUsingMeshColliders);
+            isUsingMeshColliders.boolValue = EditorGUILayout.Toggle(new GUIContent("Use mesh colliders",
+                "Give the generated road and shoulder meshes mesh colliders, so vehicles and characters can stand on "
+                + "them. Without them the road is visible but nothing can drive on it."), isUsingMeshColliders.boolValue);
             //Option: Multi-threading option: workaround for UAS submission rules:
-            isUsingMultithreading.boolValue = EditorGUILayout.Toggle("Multithreading: ", road.isUsingMultithreading);
+            isUsingMultithreading.boolValue = EditorGUILayout.Toggle(new GUIContent("Multithreading",
+                "Build this road's geometry on worker threads, which is faster on any machine with more than one core. "
+                + "Switch it off only to compare a build against the single-threaded result."),
+                isUsingMultithreading.boolValue);
             //Static:
-            isStatic.boolValue = EditorGUILayout.Toggle("Static: ", road.isStatic);
+            isStatic.boolValue = EditorGUILayout.Toggle(new GUIContent("Static",
+                "Mark the generated meshes static, which lets Unity batch them and bake lighting and occlusion for "
+                + "them. Correct for a road that will not move once it is built."), isStatic.boolValue);
             //Used for lightmapping:
-            isLightmapped.boolValue = EditorGUILayout.Toggle("Lightmapped: ", road.isLightmapped);
-            fields.FloatField(desiredRampHeight, "Ramp Height:");
+            isLightmapped.boolValue = EditorGUILayout.Toggle(new GUIContent("Lightmapped",
+                "Generate the second UV set a baked lightmap needs on the road meshes. It costs vertices, so leave it "
+                + "off unless you are baking lighting for this scene."), isLightmapped.boolValue);
+            // B-5, fault 4. "Ramp Height:" was drawn here as a bare float field -- title-cased where nothing beside it
+            // was, with no unit, no band, and nothing said about what it shapes -- while every other cross-section
+            // dimension the road has went through the registry. It is a registry field now, drawn in the "what it looks
+            // like" foldout above with its metres, its 0 to 2 m band and its own sentence, so nothing is drawn here.
 
             //Option: Save meshes as unity assets options:
-            isSavingMeshes.boolValue = EditorGUILayout.Toggle("Save mesh assets: ", road.isSavingMeshes);
-            if (road.isSavingMeshes)
+            isSavingMeshes.boolValue = EditorGUILayout.Toggle(new GUIContent("Save mesh assets",
+                "Write each generated mesh into the project as an asset instead of leaving it in the scene. It makes "
+                + "the scene file far smaller and the build far slower."), isSavingMeshes.boolValue);
+            if (isSavingMeshes.boolValue)
             {
-                GUILayout.Label("WARNING: Saving meshes as assets is very slow and can increase road generation time by several minutes.", warningLabelStyle);
+                // B-6, fault 3. This was a hand-styled red text area holding a sentence that also existed, byte for
+                // byte, in `RoadSystemEditor`. One sentence, one warning box, drawn the way the rest of the tool draws a
+                // warning. `warningLabelStyle` survives below for the terrain-history reset, which is a different
+                // warning about a different thing and is now its only remaining use.
+                LegacyInspectorShell.SavingMeshesWarning();
             }
 
 
@@ -458,35 +561,52 @@ namespace RoadCityMaster
 
             EditorGUILayout.EndVertical();
 
-            EditorGUILayout.LabelField("Terrain options:");
+            LegacyInspectorShell.SectionHeader("Terrain options",
+                "How this road reshapes the ground it is built on: the strip of terrain whose heights are matched to "
+                + "the road surface, and the grass and trees cleared out of the road's way.");
             EditorGUILayout.BeginVertical("box");
 
             //Option: Terrain subtraction:
             LegacyInspectorShell.Field(serializedObject, "Road", "matchTerrainSubtraction", fields, resetTerrainSubtraction);
 
             //Option: Spline magnitude limit:
+            // B-5, faults 5 and 8, on the seven sliders this inspector owns that are NOT registry fields. Each one is a
+            // measurement and each one used to print a bare number, so they get the same unit cell the registry rows
+            // get -- from InspectorFieldDrawer.Unit, the same method, so the column cannot drift apart between the two
+            // kinds of row. The cell's own hover names the token rather than repeating the field's sentence: the
+            // sentence is already on the label an inch to the left, and a literal repeated twice per row is a literal
+            // that gets corrected once.
             EditorGUILayout.BeginHorizontal();
-            fields.FloatSlider(magnitudeThreshold, "Spline magnitude limit:", 128f, 8192f);
+            fields.FloatSlider(magnitudeThreshold, "Spline magnitude limit", 128f, 8192f,
+                "Ceiling in metres on the length of the curve tangents between nodes. Where two nodes are further "
+                + "apart than this, the curve between them is pulled straighter instead of bowing out past them. Raise "
+                + "it for long sweeping roads; lower it if a wide gap overshoots.");
+            InspectorFieldDrawer.Unit("m", "metres");
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 magnitudeThreshold.floatValue = 300f;
             }
             EditorGUILayout.EndHorizontal();
 
+            // B-5, fault 7, and the one place in this inspector where obeying it meant MOVING controls rather than just
+            // greying them. The three switches used to be stacked together with their five widths in a block below, so
+            // greying the widths in place would have left an author looking at five grey rows with no way to tell which
+            // of the three switches above governed which. Each switch now stands immediately over the widths it
+            // governs, which is the same arrangement the shoulder width above is drawn in.
             //Option: Height modification
-            isHeightModificationEnabled.boolValue = EditorGUILayout.Toggle("Height modification: ", road.isHeightModificationEnabled);
-
-            //Option: Active detail removal
-            isDetailModificationEnabled.boolValue = EditorGUILayout.Toggle("Active detail removal: ", road.isDetailModificationEnabled);
-
-            //Option: Active tree removal
-            isTreeModificationEnabled.boolValue = EditorGUILayout.Toggle("Active tree removal: ", road.isTreeModificationEnabled);
+            isHeightModificationEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Height modification",
+                "Match the terrain heights along this road to the road surface as it is built, so the ground meets the "
+                + "carriageway instead of cutting through it or leaving it standing in the air."),
+                isHeightModificationEnabled.boolValue);
 
             //Option: heights width
-            if (road.isHeightModificationEnabled)
+            using (new EditorGUI.DisabledScope(!isHeightModificationEnabled.boolValue))
             {
                 EditorGUILayout.BeginHorizontal();
-                fields.FloatSlider(matchHeightsDistance, "Heights match width:", 0.01f, 512f);
+                fields.FloatSlider(matchHeightsDistance, "Heights match width", 0.01f, 512f,
+                    "Total width in metres of the strip whose heights are matched to the road. Half of it reaches "
+                    + "beyond each edge of the running lanes, so 50 m leaves 25 m of matched ground on either side.");
+                InspectorFieldDrawer.Unit("m", "metres");
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     matchHeightsDistance.floatValue = 50f;
@@ -494,11 +614,20 @@ namespace RoadCityMaster
                 EditorGUILayout.EndHorizontal();
             }
 
+            //Option: Active detail removal
+            isDetailModificationEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Active detail removal",
+                "Clear terrain detail -- grass and the other detail meshes -- out of the strip this road runs through, "
+                + "so nothing is left growing up through the surface. On a large terrain carrying dense grass this is "
+                + "memory-heavy: consider clearing the detail map yourself and leaving this off."),
+                isDetailModificationEnabled.boolValue);
+
             //Option: details width and height
-            if (road.isDetailModificationEnabled)
+            using (new EditorGUI.DisabledScope(!isDetailModificationEnabled.boolValue))
             {
                 EditorGUILayout.BeginHorizontal();
-                fields.FloatSlider(clearDetailsDistance, "Details clear width:", 0.01f, 512f);
+                fields.FloatSlider(clearDetailsDistance, "Details clear width", 0.01f, 512f,
+                    "Total width in metres of the strip detail is cleared from, centred on the road.");
+                InspectorFieldDrawer.Unit("m", "metres");
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearDetailsDistance.floatValue = 30f;
@@ -507,7 +636,10 @@ namespace RoadCityMaster
                 EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.BeginHorizontal();
-                fields.FloatSlider(clearDetailsDistanceHeight, "Details clear height:", 0.01f, 512f);
+                fields.FloatSlider(clearDetailsDistanceHeight, "Details clear height", 0.01f, 512f,
+                    "Vertical reach in metres. Detail whose ground sits further above or below the road surface than "
+                    + "this is left in place, so a road in a cutting does not strip the slopes standing over it.");
+                InspectorFieldDrawer.Unit("m", "metres");
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearDetailsDistanceHeight.floatValue = 5f;
@@ -516,11 +648,20 @@ namespace RoadCityMaster
                 EditorGUILayout.EndHorizontal();
             }
 
+            //Option: Active tree removal
+            isTreeModificationEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Active tree removal",
+                "Remove terrain trees standing in the strip this road runs through, so no trunk is left growing out of "
+                + "the carriageway. On a large forested terrain this is memory-heavy: consider clearing the trees "
+                + "yourself and leaving this off."), isTreeModificationEnabled.boolValue);
+
             //Option: tree widths and height
-            if (road.isTreeModificationEnabled)
+            using (new EditorGUI.DisabledScope(!isTreeModificationEnabled.boolValue))
             {
                 EditorGUILayout.BeginHorizontal();
-                fields.FloatSlider(clearTreesDistance, "Trees clear width:", 0.01f, 512f);
+                fields.FloatSlider(clearTreesDistance, "Trees clear width", 0.01f, 512f,
+                    "Total width in metres of the strip trees are removed from, centred on the road. A width narrower "
+                    + "than the road itself is raised to the road's own width, since no tree can stand in a lane.");
+                InspectorFieldDrawer.Unit("m", "metres");
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearTreesDistance.floatValue = 30f;
@@ -528,7 +669,10 @@ namespace RoadCityMaster
                 EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.BeginHorizontal();
-                fields.FloatSlider(clearTreesDistanceHeight, "Trees clear height:", 0.01f, 512f);
+                fields.FloatSlider(clearTreesDistanceHeight, "Trees clear height", 0.01f, 512f,
+                    "Vertical reach in metres. A tree whose ground sits further above or below the road surface than "
+                    + "this is left standing, so a road through a valley does not fell the hillside above it.");
+                InspectorFieldDrawer.Unit("m", "metres");
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     clearTreesDistanceHeight.floatValue = 50f;
@@ -538,12 +682,18 @@ namespace RoadCityMaster
 
 
             //Option: terrain history save type:
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Store terrain history separate from scene:");
-            isSavingTerrainHistoryOnDisk.boolValue = EditorGUILayout.Toggle(road.isSavingTerrainHistoryOnDisk, GUILayout.Width(50f));
-            EditorGUILayout.EndHorizontal();
+            // B-5, faults 2 and 8, plus a LabelField doing a label's job for a control that had none of its own. The
+            // toggle was drawn bare in a 50-pixel cell with its sentence beside it as a separate LabelField, so the
+            // words did not belong to the control: they did not highlight with it, they did not grey with it, and they
+            // could carry no hover. It is one toggle with one label now, the shape every other switch here has.
+            isSavingTerrainHistoryOnDisk.boolValue = EditorGUILayout.Toggle(
+                new GUIContent("Separate terrain history store",
+                "Keep the record of what this road changed on the terrain in a file beside the scene instead of inside "
+                + "the scene itself. It keeps the scene file small, and that record is what lets the ground be put back "
+                + "as it was."), isSavingTerrainHistoryOnDisk.boolValue);
 
-            EditorGUILayout.LabelField("Terrain history size: " + road.TerrainHistoryByteSize);
+            // B-5, fault 4. The size of that store was printed here as a bare label, in among the switches an author
+            // types into. It is drawn with this inspector's three other figures in the measured group at the foot.
 
 
             RenderTerrainHelpDialog();
@@ -553,43 +703,48 @@ namespace RoadCityMaster
 
 
 
-            GUILayout.Label("Road and shoulder splitting:");
+            LegacyInspectorShell.SectionHeader("Road and shoulder splitting",
+                "Whether this road's mesh is cut into separate pieces where it meets other roads, and whether the tool "
+                + "does that cutting or you do.");
             EditorGUILayout.BeginVertical("box");
             GUILayout.Space(4f);
 
+            // B-5, faults 1, 2, 3, 7 and 8 together, and the section where fault 7 was doing the most damage. Turning
+            // manual splitting on REPLACED the two automatic switches with two labels reading "Manual road splitting:
+            // true" -- a value where a control had been, so both real settings became invisible and unreachable at the
+            // same moment, and neither label was a control an author could put back. The switch that governs them is
+            // drawn first now and the two it governs stay in place, greyed. Its refresh button is OUTSIDE that grey:
+            // switching manual splitting back off is the button's whole purpose, so it is the one control here that
+            // has to keep working in the manual state -- which is why the original drew a copy of it in both branches.
+            //Option: manual splitting:
+            EditorGUILayout.BeginHorizontal();
+            isDynamicCutsEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Manual splitting",
+                "Split this road yourself, at the nodes you choose, instead of letting the tool split it where it "
+                + "meets other roads. The two automatic switches below are greyed while this is on."),
+                isDynamicCutsEnabled.boolValue);
+            if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
+            {
+                isDynamicCutsEnabled.boolValue = false;
+                isRoadCutsEnabled.boolValue = true;
+                isShoulderCutsEnabled.boolValue = true;
+            }
+            EditorGUILayout.EndHorizontal();
+
             //Option: road cuts:
-            if (!road.isDynamicCutsEnabled)
+            using (new EditorGUI.DisabledScope(isDynamicCutsEnabled.boolValue))
             {
-                EditorGUILayout.BeginHorizontal();
-                isRoadCutsEnabled.boolValue = EditorGUILayout.Toggle("Auto split road: ", road.isRoadCutsEnabled);
-                if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
-                {
-                    isDynamicCutsEnabled.boolValue = false;
-                    isRoadCutsEnabled.boolValue = true;
-                    isShoulderCutsEnabled.boolValue = true;
-                }
-                EditorGUILayout.EndHorizontal();
-
-                if (road.isShouldersEnabled)
-                {
-                    isShoulderCutsEnabled.boolValue = EditorGUILayout.Toggle("Auto split shoulders: ", road.isShoulderCutsEnabled);
-                }
+                isRoadCutsEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Auto split road",
+                    "Cut the road mesh where it meets an intersection, so the piece inside the junction can be hidden "
+                    + "and the junction's own surface drawn there instead."), isRoadCutsEnabled.boolValue);
             }
-            else
+
+            //Option: shoulder cuts:
+            using (new EditorGUI.DisabledScope(isDynamicCutsEnabled.boolValue || !isShouldersEnabled.boolValue))
             {
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Manual road splitting: true");
-                if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
-                {
-                    isDynamicCutsEnabled.boolValue = false;
-                    isRoadCutsEnabled.boolValue = true;
-                    isShoulderCutsEnabled.boolValue = true;
-                }
-                EditorGUILayout.EndHorizontal();
-
-                EditorGUILayout.LabelField("Manual shoulder splitting: true");
+                isShoulderCutsEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Auto split shoulders",
+                    "Cut the shoulder meshes in the same places as the road. Available while this road has shoulders."),
+                    isShoulderCutsEnabled.boolValue);
             }
-            isDynamicCutsEnabled.boolValue = EditorGUILayout.Toggle("Manual splitting: ", road.isDynamicCutsEnabled);
 
 
             RenderCutsHelpDialog();
@@ -599,12 +754,17 @@ namespace RoadCityMaster
 
 
             //Camera:
-            EditorGUILayout.LabelField("Editor camera travel:");
+            LegacyInspectorShell.SectionHeader("Editor camera travel",
+                "Fly a camera along this road without entering play mode, to look at what you have built from the "
+                + "height and angle a driver on it would see.");
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.BeginHorizontal();
 
             //Option: Editor camera meters per sec
-            fields.FloatSlider(editorCameraMetersPerSecond, "Camera meters/sec:", 1f, 512f);
+            fields.FloatSlider(editorCameraMetersPerSecond, "Camera speed", 1f, 512f,
+                "How fast the camera travels along the road, in metres per second. The default 60 m/s is 216 km/h; a "
+                + "motorway cruise is nearer 30 m/s and a town street nearer 14 m/s.");
+            InspectorFieldDrawer.Unit("m/s", "metres per second");
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
                 editorCameraMetersPerSecond.floatValue = 60f;
@@ -612,12 +772,12 @@ namespace RoadCityMaster
             EditorGUILayout.EndHorizontal();
 
             //Option: Editor camera auto rotate:
-            isEditorCameraRotated.boolValue = EditorGUILayout.Toggle("Camera auto rotate: ", road.isEditorCameraRotated);
-            if (road.editorPlayCamera == null)
-            {
-                road.EditorCameraSetSingle();
-            }
-            road.editorPlayCamera = (Camera)EditorGUILayout.ObjectField("Editor play camera:", road.editorPlayCamera, typeof(Camera), true);
+            isEditorCameraRotated.boolValue = EditorGUILayout.Toggle(new GUIContent("Camera auto rotate",
+                "Turn the camera to face along the road as it travels, instead of holding the direction it set out in."),
+                isEditorCameraRotated.boolValue);
+            isCameraPickFailed = LegacyInspectorShell.CameraField(editorPlayCamera,
+                "The camera that gets flown along this road. Fill it in from the scene with the button below, or drag "
+                + "the camera to use into the field.", isCameraPickFailed);
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Reset", GUILayout.Width(70f)))
             {
@@ -656,7 +816,9 @@ namespace RoadCityMaster
 
             EditorGUILayout.EndVertical();
 
-            GUILayout.Label("Materials:");
+            LegacyInspectorShell.SectionHeader("Materials",
+                "What this road is surfaced with: the base material of the road and its shoulders, the markings painted "
+                + "on them, and the physics materials that decide how much grip the finished surface has.");
             EditorGUILayout.BeginVertical("box");
             //Road material defaults:
 
@@ -671,27 +833,40 @@ namespace RoadCityMaster
 
 
             //Physics materials:
-            GUILayout.Label("Physics materials defaults:");
+            LegacyInspectorShell.SectionHeader("Physics material defaults",
+                "The physics materials given to the colliders this road generates, which is what decides how much "
+                + "friction a wheel or a foot finds on the surface.");
             //Option: physical road mat:
-            fields.Property(roadPhysicMaterial, new GUIContent("Road phys mat: "));
+            fields.Property(roadPhysicMaterial, new GUIContent("Road physics material",
+                "Physics material for the road surface's own colliders. Left empty, those colliders fall back on "
+                + "Unity's default friction rather than on anything this tool chose."));
 
 
             //Option: physical shoulder mat:
-            fields.Property(shoulderPhysicMaterial, new GUIContent("Shoulder phys mat: "));
+            fields.Property(shoulderPhysicMaterial, new GUIContent("Shoulder physics material",
+                "Physics material for the shoulder colliders, which is normally the rougher of the two: a shoulder is "
+                + "gravel or grass where the road is asphalt."));
 
 
             GUILayout.Space(4);
             EditorGUILayout.BeginHorizontal();
             //Option: Apply above materials to entire road:
-            EditorGUILayout.LabelField("Apply above materials to entire road:");
-            isApplyingMaterialsCheck = EditorGUILayout.Toggle(isApplyingMaterialsCheck, GUILayout.Width(20f));
+            // B-5, faults 2 and 8. Another bare toggle with its sentence sitting beside it as a LabelField, and the one
+            // here mattered more than most: the words the author reads are a WARNING about what the button does, and
+            // words that are not the control's label are not on the control's hover when they are needed.
+            isApplyingMaterialsCheck = EditorGUILayout.Toggle(new GUIContent("Apply materials to entire road",
+                "Arm the Apply button beside this, which lays the materials above onto every piece of this road at "
+                + "once, including the pieces cut out at its junctions."), isApplyingMaterialsCheck);
+            // B-14. The press used to be accepted and then discarded when the toggle beside it was clear -- a button
+            // that answers a click with nothing at all, which is this entry's own definition of a control
+            // indistinguishable from a stub. Disabling it says the same thing the swallowed press was trying to say,
+            // and says it before the author clicks rather than after.
+            EditorGUI.BeginDisabledGroup(!isApplyingMaterialsCheck);
             if (GUILayout.Button("Apply", EditorStyles.miniButton, GUILayout.Width(60f)))
             {
-                if (isApplyingMaterialsCheck)
-                {
-                    isApplyingMatsCheck = true;
-                }
+                isApplyingMatsCheck = true;
             }
+            EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.LabelField("Applying will overwrite any saved cuts' material(s).");
 
@@ -702,24 +877,25 @@ namespace RoadCityMaster
             //Reset terrain history:
             EditorUtilities.DrawLine();
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Reset road's terrain history:");
-            isResetingTH = EditorGUILayout.Toggle(isResetingTH, GUILayout.Width(20f));
-            if (isResetingTH)
+            isResetingTH = EditorGUILayout.Toggle(new GUIContent("Reset road's terrain history",
+                "Arm the button beside this. A reset throws away the record of the ground this road changed, after "
+                + "which that ground can no longer be put back as it was -- read the warning it prints once armed."),
+                isResetingTH);
+            // B-14. This was two buttons in an if/else on the same flag, and the disarmed one read
+            // `if (GUILayout.Button(...) && isResetingTH)` inside the branch where `isResetingTH` is false by
+            // construction -- a body that could never run, guarding a press that was therefore silently dropped. One
+            // button in a disabled group is the same gesture with the dead half deleted rather than left beside it.
+            EditorGUI.BeginDisabledGroup(!isResetingTH);
+            if (GUILayout.Button("Reset"))
             {
-                if (GUILayout.Button("Reset") && isResetingTH)
-                {
-                    road.ResetTerrainHistory();
-                    isResetingTH = false;
-                }
+                road.ResetTerrainHistory();
+                isResetingTH = false;
+                // The work is a deletion, it is irreversible by the warning's own admission, and it leaves nothing on
+                // screen that changed -- so without this line the author cannot tell a reset from a dropped click.
+                Debug.Log("Road & City Master: the terrain history of \"" + road.name + "\" was reset. The ground this"
+                    + " road changed can no longer be put back as it was.");
             }
-            else
-            {
-                if (GUILayout.Button("Check to reset", maybeButton) && isResetingTH)
-                {
-                    road.ResetTerrainHistory();
-                    isResetingTH = false;
-                }
-            }
+            EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
 
             if (isResetingTH)
@@ -729,11 +905,43 @@ namespace RoadCityMaster
             GUILayout.Space(6f);
 
 
-            EditorGUILayout.LabelField("Statistics:");
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Length: " + road.spline.distance.ToString("F1") + " meters");
-            EditorGUILayout.LabelField("Total nodes: " + road.MostRecentNodeCount.ToString());
-            EditorGUILayout.EndVertical();
+            // B-5, fault 4, and the last of it. "Statistics:" was a box of bare labels -- a length and a node count here,
+            // a road width and a terrain history size printed further up the page -- each drawn in the same LabelField
+            // the editable rows used, in four separate places. All four are computed, none of them is editable, and
+            // RM-64's policy gives measurements ONE heading, so all four are drawn here, closed until an author opens
+            // them because a measurement is an answer they go looking for rather than somewhere they work. One group
+            // and not four: BeginMeasured keys its open state by COMPONENT, so a second BeginMeasured("Road") on this
+            // page would share this one's key and open and close with it.
+            bool measuredOpen = LegacyInspectorShell.BeginMeasured("Road");
+            if (measuredOpen)
+            {
+                LegacyInspectorShell.Measured("Travelled-way width", road.RoadWidth().ToString("F1"), "m");
+                LegacyInspectorShell.Measured("Centreline length", road.spline.distance.ToString("F1"), "m");
+                LegacyInspectorShell.Measured("Terrain history store", road.TerrainHistoryByteSize, null);
+                LegacyInspectorShell.Measured("Nodes in last build", road.MostRecentNodeCount.ToString(), null);
+
+                // RM-110, B-9. The three figures an author asked for and this inspector could not answer: how much
+                // geometry the road actually is, and when it was last built.
+                //
+                // Both are computed here rather than stored, and for different reasons. The counts are summed from the
+                // meshes under the road on each repaint, so nothing can be stale about them -- an author who deletes an
+                // edge object or undoes a build sees the number move. The build time cannot be measured from anything,
+                // so it is a stamp the road writes when a build finishes; a road that has never been built says so in
+                // words instead of showing a date of nothing.
+                //
+                // Drawn inside the `if (measuredOpen)` and nowhere else, which is what keeps MeshTally's walk of the
+                // child MeshFilters off the cost of every repaint of a closed foldout. "n0" for the counts, the same
+                // spelling the terrain history size uses, because six unseparated digits are read wrongly at a glance.
+                int meshVertices;
+                int meshTriangles;
+                road.MeshTally(out meshVertices, out meshTriangles);
+                LegacyInspectorShell.Measured("Mesh vertices", meshVertices.ToString("n0"), null);
+                LegacyInspectorShell.Measured("Mesh triangles", meshTriangles.ToString("n0"), null);
+
+                string lastBuilt = road.LastBuildLocalText();
+                LegacyInspectorShell.Measured("Last built", lastBuilt == null ? "never" : lastBuilt, null);
+            }
+            LegacyInspectorShell.EndMeasured(measuredOpen);
 
             bool isLaneChanged = false;
             bool isTerrainHistoryChanged = false;
@@ -831,6 +1039,18 @@ namespace RoadCityMaster
                 {
                     isApplyingMatsCheck = false;
                     isApplyingMaterialsCheck = false;
+                    // B-14. SetAllCutsToCurrentMaterials returns without a word when there is no road mesh, and this is
+                    // the one press where that silence is a lie: the whole gesture is "put these materials on the road
+                    // that is there now", and on an unbuilt road there are no renderers to put them on. The two other
+                    // callers of it in this inspector are material CHANGES -- those land in the road's own fields and
+                    // the next build carries them out, so nothing is lost and a warning there would be noise. Only this
+                    // one accomplishes literally nothing, so only this one says so.
+                    if (road.MeshRoad == null)
+                    {
+                        Debug.LogWarning("Road & City Master: \"" + road.name + "\" has no road mesh yet, so there was"
+                            + " nothing for Apply to put the materials on. Build the road first; the materials listed"
+                            + " here are already saved and the build will use them.");
+                    }
                     road.SetAllCutsToCurrentMaterials();
                 }
 
@@ -839,11 +1059,54 @@ namespace RoadCityMaster
         }
 
 
+        /// <summary> The four slot labels, spelled once. B-5, faults 2 and 3: they read `"  Mat #1: "` -- two spaces
+        /// faking an indent, an abbreviation nothing else in the inspector uses, and a trailing colon. The indent is
+        /// real indentation now (<see cref="EditorGUI.indentLevel"/>, in <see cref="MaterialSlot"/>), and the word is
+        /// the one the rest of the tool uses. </summary>
+        private static readonly string[] MaterialSlotLabels = { "Material 1", "Material 2", "Material 3", "Material 4" };
+
+
+        /// <summary> One material slot: the object field, and the narrow button that clears it, on one row. Returns true
+        /// on the frame the clear button is pressed, which is the ONLY thing the four callers still do for themselves --
+        /// each writes null to its own property, so the sixteen assignments stay exactly where they were and this method
+        /// needs no knowledge of which stack it is drawing.
+        ///
+        /// B-5's largest single piece of duplication lived here: sixteen copies of the same four lines, once per slot
+        /// per stack, differing only in a property and a label. Sixteen copies of a row is sixteen places a column
+        /// width, a button size or a label style can drift apart, and the four stacks HAD drifted -- only the road base
+        /// stack carried the refresh button, and each stack spelled its heading its own way.
+        ///
+        /// The indent is what the two leading spaces in the old label were reaching for: these rows sit under the
+        /// heading of the stack they belong to, and an author reading down four headings needs to see which rows hang
+        /// off which. `indentLevel` indents the FIRST control in a horizontal group, which is this row's object field;
+        /// the clear button follows it across, so a slot indents as one row rather than splitting. </summary>
+        private bool MaterialSlot(SerializedProperty prop, int index, string tooltip)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.BeginHorizontal();
+            fields.Property(prop, new GUIContent(MaterialSlotLabels[index], tooltip));
+            bool isClearing = GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f));
+            EditorGUILayout.EndHorizontal();
+            EditorGUI.indentLevel--;
+            return isClearing;
+        }
+
+
         private void RenderRoadMaterials()
         {
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Road base material(s) defaults:");
+            LegacyInspectorShell.SectionHeader("Road base materials",
+                "The material laid on the road's driving surface, with three further slots for a mesh that needs more "
+                + "than one. Each slot opens once the slot above it has been filled.");
 
+            //Option: Use default materials:
+            // The refresh button was in the heading row, which is where it could not stay: a heading goes through the
+            // shell now and the shell puts vertical space above it, and vertical space inside a horizontal group is
+            // horizontal space. It belongs on this row anyway -- putting the tool's own materials back is exactly the
+            // reset for this toggle, and every other reset button in this inspector sits on the row it resets.
+            EditorGUILayout.BeginHorizontal();
+            isUsingDefaultMaterials.boolValue = EditorGUILayout.Toggle(new GUIContent("Use default materials",
+                "Surface this road with the set named by \"Road material\" at the top of this inspector instead of the "
+                + "materials listed below. Switch it off to assign your own."), isUsingDefaultMaterials.boolValue);
             //Option: Set materials to default:
             if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
             {
@@ -852,50 +1115,23 @@ namespace RoadCityMaster
             }
             EditorGUILayout.EndHorizontal();
 
-
-            //Option: Use default materials:
-            isUsingDefaultMaterials.boolValue = EditorGUILayout.Toggle("Use default materials:", road.isUsingDefaultMaterials);
-
-            EditorGUILayout.BeginHorizontal();
-            fields.Property(roadMaterial1, new GUIContent("  Mat #1: "));
-            if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+            string slotTip = "Material for the road's driving surface. It is UV mapped on world coordinates, so the "
+                + "tiling runs unbroken from one piece of road into the next.";
+            // B-11. The clear button beside each slot DID NOTHING. It wrote `road.RoadMaterialN = null` -- a direct field
+            // write, made between this inspector's serializedObject.Update() and its ApplyModifiedProperties(), so the
+            // write-back at the end of the same frame put the material straight back from the serialised copy that had
+            // never been told. The clear goes through the property, like the assignment beside it. The cascade asks the
+            // property too, so a slot filled this frame opens the next one this frame instead of one repaint later.
+            if (MaterialSlot(roadMaterial1, 0, slotTip)) { roadMaterial1.objectReferenceValue = null; }
+            if (roadMaterial1.objectReferenceValue != null)
             {
-                road.RoadMaterial1 = null;
-            }
-            EditorGUILayout.EndHorizontal();
-
-
-            if (road.RoadMaterial1 != null)
-            {
-                EditorGUILayout.BeginHorizontal();
-                fields.Property(roadMaterial2, new GUIContent("  Mat #2: "));
-                if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                if (MaterialSlot(roadMaterial2, 1, slotTip)) { roadMaterial2.objectReferenceValue = null; }
+                if (roadMaterial2.objectReferenceValue != null)
                 {
-                    road.RoadMaterial2 = null;
-                }
-                EditorGUILayout.EndHorizontal();
-
-
-                if (road.RoadMaterial2 != null)
-                {
-                    EditorGUILayout.BeginHorizontal();
-                    fields.Property(roadMaterial3, new GUIContent("  Mat #3: "));
-                    if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                    if (MaterialSlot(roadMaterial3, 2, slotTip)) { roadMaterial3.objectReferenceValue = null; }
+                    if (roadMaterial3.objectReferenceValue != null)
                     {
-                        road.RoadMaterial3 = null;
-                    }
-                    EditorGUILayout.EndHorizontal();
-
-
-                    if (road.RoadMaterial3 != null)
-                    {
-                        EditorGUILayout.BeginHorizontal();
-                        fields.Property(roadMaterial4, new GUIContent("  Mat #4: "));
-                        if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
-                        {
-                            road.RoadMaterial4 = null;
-                        }
-                        EditorGUILayout.EndHorizontal();
+                        if (MaterialSlot(roadMaterial4, 3, slotTip)) { roadMaterial4.objectReferenceValue = null; }
                     }
                 }
             }
@@ -905,47 +1141,21 @@ namespace RoadCityMaster
         private void RenderRoadMarkerMaterials()
         {
             //		//Road marker material defaults:
-            GUILayout.Label("Road marker material(s) defaults:");
+            LegacyInspectorShell.SectionHeader("Road marker materials",
+                "The materials that carry this road's painted markings.");
 
-            EditorGUILayout.BeginHorizontal();
-            fields.Property(roadMaterialMarker1, new GUIContent("  Mat #1: "));
-            if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+            string slotTip = "Material for the lane markings. It is laid OVER the base material as a transparent "
+                + "overlay, so a marker material with no transparency hides the road surface under it.";
+            if (MaterialSlot(roadMaterialMarker1, 0, slotTip)) { roadMaterialMarker1.objectReferenceValue = null; }
+            if (roadMaterialMarker1.objectReferenceValue != null)
             {
-                road.RoadMaterialMarker1 = null;
-            }
-            EditorGUILayout.EndHorizontal();
-
-            if (road.RoadMaterialMarker1 != null)
-            {
-                EditorGUILayout.BeginHorizontal();
-                fields.Property(roadMaterialMarker2, new GUIContent("  Mat #2: "));
-                if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                if (MaterialSlot(roadMaterialMarker2, 1, slotTip)) { roadMaterialMarker2.objectReferenceValue = null; }
+                if (roadMaterialMarker2.objectReferenceValue != null)
                 {
-                    road.RoadMaterialMarker2 = null;
-                }
-                EditorGUILayout.EndHorizontal();
-
-
-                if (road.RoadMaterialMarker2 != null)
-                {
-                    EditorGUILayout.BeginHorizontal();
-                    fields.Property(roadMaterialMarker3, new GUIContent("  Mat #3: "));
-                    if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                    if (MaterialSlot(roadMaterialMarker3, 2, slotTip)) { roadMaterialMarker3.objectReferenceValue = null; }
+                    if (roadMaterialMarker3.objectReferenceValue != null)
                     {
-                        road.RoadMaterialMarker3 = null;
-                    }
-                    EditorGUILayout.EndHorizontal();
-
-
-                    if (road.RoadMaterialMarker3 != null)
-                    {
-                        EditorGUILayout.BeginHorizontal();
-                        fields.Property(roadMaterialMarker4, new GUIContent("  Mat #4: "));
-                        if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
-                        {
-                            road.RoadMaterialMarker4 = null;
-                        }
-                        EditorGUILayout.EndHorizontal();
+                        if (MaterialSlot(roadMaterialMarker4, 3, slotTip)) { roadMaterialMarker4.objectReferenceValue = null; }
                     }
                 }
             }
@@ -955,50 +1165,26 @@ namespace RoadCityMaster
         private void RenderShoulderMaterials()
         {
             //		//Shoulder material defaults:
-            if (road.isShouldersEnabled)
+            // The whole section stays HIDDEN when this road has no shoulders, which is the other half of B-5's fault 7:
+            // a value-bearing field is greyed so an author can still read what the road HAS, but a section describing a
+            // part the road does not have has nothing to read.
+            if (isShouldersEnabled.boolValue)
             {
-                GUILayout.Label("Shoulder base material(s) defaults:");
+                LegacyInspectorShell.SectionHeader("Shoulder base materials",
+                    "The material laid on the shoulder strips that run along each edge of the road.");
 
-                EditorGUILayout.BeginHorizontal();
-                fields.Property(shoulderMaterial1, new GUIContent("  Mat #1: "));
-                if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                string slotTip = "Material for the shoulder surface, which is normally the coarser of the two: a "
+                    + "shoulder is gravel or grass where the road is asphalt.";
+                if (MaterialSlot(shoulderMaterial1, 0, slotTip)) { shoulderMaterial1.objectReferenceValue = null; }
+                if (shoulderMaterial1.objectReferenceValue != null)
                 {
-                    road.ShoulderMaterial1 = null;
-                }
-                EditorGUILayout.EndHorizontal();
-
-
-                if (road.ShoulderMaterial1 != null)
-                {
-                    EditorGUILayout.BeginHorizontal();
-                    fields.Property(shoulderMaterial2, new GUIContent("  Mat #2: "));
-                    if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                    if (MaterialSlot(shoulderMaterial2, 1, slotTip)) { shoulderMaterial2.objectReferenceValue = null; }
+                    if (shoulderMaterial2.objectReferenceValue != null)
                     {
-                        road.ShoulderMaterial2 = null;
-                    }
-                    EditorGUILayout.EndHorizontal();
-
-
-                    if (road.ShoulderMaterial2 != null)
-                    {
-                        EditorGUILayout.BeginHorizontal();
-                        fields.Property(shoulderMaterial3, new GUIContent("  Mat #3: "));
-                        if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                        if (MaterialSlot(shoulderMaterial3, 2, slotTip)) { shoulderMaterial3.objectReferenceValue = null; }
+                        if (shoulderMaterial3.objectReferenceValue != null)
                         {
-                            road.ShoulderMaterial3 = null;
-                        }
-                        EditorGUILayout.EndHorizontal();
-
-
-                        if (road.ShoulderMaterial3 != null)
-                        {
-                            EditorGUILayout.BeginHorizontal();
-                            fields.Property(shoulderMaterial4, new GUIContent("  Mat #4: "));
-                            if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
-                            {
-                                road.ShoulderMaterial4 = null;
-                            }
-                            EditorGUILayout.EndHorizontal();
+                            if (MaterialSlot(shoulderMaterial4, 3, slotTip)) { shoulderMaterial4.objectReferenceValue = null; }
                         }
                     }
                 }
@@ -1009,54 +1195,92 @@ namespace RoadCityMaster
         private void RenderShoulderMarkerMaterials()
         {
             ////Shoulder marker material defaults:
-            if (road.isShouldersEnabled)
+            if (isShouldersEnabled.boolValue)
             {
-                GUILayout.Label("Shoulder marker material(s) defaults:");
+                LegacyInspectorShell.SectionHeader("Shoulder marker materials",
+                    "The materials that carry the markings painted on the shoulders.");
 
-                EditorGUILayout.BeginHorizontal();
-                fields.Property(shoulderMaterialMarker1, new GUIContent("  Mat #1: "));
-                if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                string slotTip = "Material for the edge line at the outside boundary of the running lanes. It is laid "
+                    + "over the shoulder surface as a transparent overlay.";
+                if (MaterialSlot(shoulderMaterialMarker1, 0, slotTip))
                 {
-                    road.ShoulderMaterialMarker1 = null;
+                    shoulderMaterialMarker1.objectReferenceValue = null;
                 }
-                EditorGUILayout.EndHorizontal();
-
-
-                if (road.ShoulderMaterialMarker1 != null)
+                if (shoulderMaterialMarker1.objectReferenceValue != null)
                 {
-                    EditorGUILayout.BeginHorizontal();
-                    fields.Property(shoulderMaterialMarker2, new GUIContent("  Mat #2: "));
-                    if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                    if (MaterialSlot(shoulderMaterialMarker2, 1, slotTip))
                     {
-                        road.ShoulderMaterialMarker2 = null;
+                        shoulderMaterialMarker2.objectReferenceValue = null;
                     }
-                    EditorGUILayout.EndHorizontal();
-
-
-                    if (road.ShoulderMaterialMarker2 != null)
+                    if (shoulderMaterialMarker2.objectReferenceValue != null)
                     {
-                        EditorGUILayout.BeginHorizontal();
-                        fields.Property(shoulderMaterialMarker3, new GUIContent("  Mat #3: "));
-                        if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                        if (MaterialSlot(shoulderMaterialMarker3, 2, slotTip))
                         {
-                            road.ShoulderMaterialMarker3 = null;
+                            shoulderMaterialMarker3.objectReferenceValue = null;
                         }
-                        EditorGUILayout.EndHorizontal();
-
-
-                        if (road.ShoulderMaterialMarker3 != null)
+                        if (shoulderMaterialMarker3.objectReferenceValue != null)
                         {
-                            EditorGUILayout.BeginHorizontal();
-                            fields.Property(shoulderMaterialMarker4, new GUIContent("  Mat #4: "));
-                            if (GUILayout.Button(deleteButtonText, imageButton, GUILayout.Width(16f)))
+                            if (MaterialSlot(shoulderMaterialMarker4, 3, slotTip))
                             {
-                                road.ShoulderMaterialMarker4 = null;
+                                shoulderMaterialMarker4.objectReferenceValue = null;
                             }
-                            EditorGUILayout.EndHorizontal();
                         }
                     }
                 }
             }
+        }
+
+
+        /// <summary> B-5. The head of a quick-help panel: the panel's name, the button that opens the offline manual,
+        /// and the line pointing at the online one. It stood four times in this file in four different shapes -- one
+        /// drew the heading and the button inside a horizontal group, one drew them with no group so the button fell
+        /// onto its own line, one left the HelpBox out altogether, and every heading ended in a colon (fault 2). The
+        /// shape is settled once here, so the four panels open the same way and a fifth cannot open a sixth way.
+        ///
+        /// <paramref name="title"/> arrives WITHOUT a colon and is not given one. </summary>
+        private void RenderHelpHeader(string title)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+            if (GUILayout.Button("Manual", EditorStyles.miniButton, GUILayout.Width(120f)))
+            {
+                RoadCityMaster.EditorUtilities.OpenOfflineManual();
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.HelpBox(onlineHelpDesc, MessageType.Info);
+        }
+
+
+        /// <summary> One paragraph of help text, and the gap under it. Roughly thirty of these were written out as a
+        /// LabelField and a Space in a row, and they had drifted the way repeated pairs do: most took the default label
+        /// style, which does not wrap -- a help sentence longer than the inspector is wide was simply cut off at the
+        /// edge -- and one took `miniLabel` for no reason but the order it was typed in.
+        ///
+        /// `wordWrappedLabel` is READ, never written: B-3's fault was mutating the instances the editor owns, and
+        /// <see cref="InspectorStyleOwnershipGate"/> holds that line. These panels draw only from OnInspectorGUI, so
+        /// the skin is always up by the time this runs. </summary>
+        private void RenderHelpParagraph(string text)
+        {
+            EditorGUILayout.LabelField(text, EditorStyles.wordWrappedLabel);
+            GUILayout.Space(4f);
+        }
+
+
+        /// <summary> The reset legend that closes a help panel: the icon, and what pressing it does. Five identical
+        /// copies, one per panel.
+        ///
+        /// The picture is drawn with GUILayout.Label rather than GUILayout.Button. B-14: it was a Button whose result was
+        /// thrown away, which is a control that lights up under the cursor, depresses when clicked, and does nothing --
+        /// the clearest case in the tool of what this entry calls indistinguishable from a stub, and B-5's pass left it
+        /// as one site to judge rather than five to find. A legend is not a control, so it is no longer drawn as one.
+        /// The style is the same, so the glyph looks identical to the buttons it explains. </summary>
+        private void RenderResetLegend()
+        {
+            GUILayout.Space(4f);
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(refreshButtonTexture, imageButton, GUILayout.Width(16f));
+            EditorGUILayout.LabelField("= Resets that row to its default value.");
+            EditorGUILayout.EndHorizontal();
         }
 
 
@@ -1068,24 +1292,18 @@ namespace RoadCityMaster
             if (isShowingMaterialsHelp)
             {
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField("These default materials will be applied by default to their respective generated meshes. If using split roads and or shoulders, you can specific specific materials to use on them (on the mesh renderers of the cuts) and they will be used instead of the default materials listed above.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Road base material is UV mapped on a world vector basis for seamless tiles.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Road marker material is UV mapped to fit roads. Use these materials to place road lines and other road texture details. Note: if using road cuts, these are the materials which will be placed by default at the initial generation.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Shoulder base material is UV mapped on a world vector basis for seamless tiles.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Shoulder marker material is UV mapped on a world vector basis for seamless tiles. For intended use with transparent shadow receiving shaders. Marker materials are applied, optionally, on shoulder cuts.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("The physical material for road will be used on all road colliders. The physical material for shoulder will be used on all shoulder colliders. If using road and or shoulder cuts, you can specficy unique physics materials which will be used instead of the default physics materials.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Apply above materials button will clear all saved materials on the roads and all road and shoulder meshes will use the materials listed above.");
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
-                EditorGUILayout.LabelField(" = Resets settings to default.");
-                EditorGUILayout.EndHorizontal();
+                RenderHelpHeader("Materials quick help");
+                // B-5, the other half of fault 8. This panel held seven paragraphs and six of them described one field
+                // each: what the base material is, how the marker material is mapped, what the physics materials are
+                // for. Every one of those fields carries that sentence on its own hover now, and a description written
+                // twice is a description corrected once -- the copy an author is NOT reading is the one that goes
+                // stale. What stays is the paragraph that is not about a field: what becomes of these materials once
+                // the road has been split into pieces.
+                EditorGUILayout.LabelField("The materials above are this road's defaults. A road split at its "
+                    + "junctions can carry different materials on each piece, set on that piece's own mesh renderer, "
+                    + "and where a piece names its own material that is used instead of the default.",
+                    EditorStyles.wordWrappedLabel);
+                RenderResetLegend();
                 EditorGUILayout.EndVertical();
             }
         }
@@ -1098,26 +1316,15 @@ namespace RoadCityMaster
             if (isShowingCameraHelp)
             {
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Editor camera quick help:", EditorStyles.boldLabel);
-                if (GUILayout.Button("Manual", EditorStyles.miniButton, GUILayout.Width(120f)))
-                {
-                    RoadCityMaster.EditorUtilities.OpenOfflineManual();
-                }
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.HelpBox(onlineHelpDesc, MessageType.Info);
-                EditorGUILayout.LabelField("Use this section to travel along the road while in the editor sceneview.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Camera meters/sec is the speed at which the camera moves along the road.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Auto rotate will automatically rotate the camera to look forward at the current road's tangent. Note: You can still zoom in and out with the camera with this option selected.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Note: Materials act differently in the editor scene view compared to actual gameplay. Try the game camera if the materials are z fighting and having other issues.");
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
-                EditorGUILayout.LabelField(" = Resets settings to default.");
-                EditorGUILayout.EndHorizontal();
+                RenderHelpHeader("Editor camera quick help");
+                // Three paragraphs left this panel for the hovers of the three controls they described. This one stays
+                // because it is not about a control: it is about the difference between what the scene view shows and
+                // what the game camera will.
+                EditorGUILayout.LabelField("Materials behave differently in the editor scene view than in play mode. "
+                    + "If a surface flickers against another, or a marker will not sit on top of the road, look at it "
+                    + "through the game camera before changing the materials.",
+                    EditorStyles.wordWrappedLabel);
+                RenderResetLegend();
                 EditorGUILayout.EndVertical();
             }
         }
@@ -1129,55 +1336,33 @@ namespace RoadCityMaster
             if (isShowingCutsHelp)
             {
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Road splitting quick help:", EditorStyles.boldLabel);
-                if (GUILayout.Button("Manual", EditorStyles.miniButton, GUILayout.Width(120f)))
-                {
-                    RoadCityMaster.EditorUtilities.OpenOfflineManual();
-                }
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.HelpBox(onlineHelpDesc, MessageType.Info);
-
-                EditorGUILayout.LabelField("Typically auto-split will be the best choice for performance and other reasons.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Choosing split options will split the road/shoulder up into pieces mirroring the locations of nodes.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Splitting allows for more detailed and flexible road texturing options such as passing sections, other different road lines per section, road debris and more.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Choosing split options may also speed up mesh collider collision calculations if bounds calculations are involved.");
-                GUILayout.Space(4f);
+                RenderHelpHeader("Road splitting quick help");
+                RenderHelpParagraph("Splitting cuts this road's mesh into separate pieces at the nodes, so each piece "
+                    + "can carry its own materials -- a passing section with dotted lines, a no-passing stretch with "
+                    + "double solid ones, road debris along one length and not another.");
+                RenderHelpParagraph("It can also make collision cheaper, since several smaller mesh colliders cost "
+                    + "less to test than one very large one. Automatic splitting is the right choice for most roads.");
 
                 EditorGUILayout.LabelField("Which splitting option to choose?", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Choose no splitting if you desire a single material set for this entire road and your game experiences no collison processing slowdowns from one large mesh collider. This option will create less game objects than automatic and manual splitting.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Choose automatic road and shoulder splitting if you desire multiple materials (such as yellow double lines for certain sections and white dotted for others) for this road and or your game experiences collision processing slowdowns from one large mesh collider.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Choose manual road and shoulder splitting if you desire the same as automatic splitting and desire more freedom over the process. This option will result in less gameobjects and larger mesh colliders when compared to automatic splitting.");
-                GUILayout.Space(4f);
-
+                RenderHelpParagraph("No splitting: one material set for the whole road, and the fewest game objects. "
+                    + "Right where collision is no bottleneck and the road needs no variation along its length.");
+                RenderHelpParagraph("Automatic splitting: a piece per node, cut for you. Right where the road needs "
+                    + "different markings along its length, or where one large mesh collider is costing too much.");
+                RenderHelpParagraph("Manual splitting: the same, but you choose which nodes are cut. It leaves fewer "
+                    + "and larger pieces than automatic splitting, and so fewer game objects.");
 
                 EditorUtilities.DrawLine();
-                EditorGUILayout.LabelField("Manual splitting information: ");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Choosing manual splitting will force the user to select individual nodes to cut instead of the cuts being performed automatically. This option is recommended if bigger mesh colliders do not cause a slowdown in performance, as it lowers the overall gameobject count.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Manual splitting will not split up the mesh colliders like automatic cuts, so the colliders may get large & complex and cost more CPU to process collisions. If this option is chosen, please verify your game's collision processing speed and if you run into long collision processing times split more road sections");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Example usages of manual splitting");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Example hill: Goal is to have double yellow no passing lines on a two lane road but only while the road is near or on the hill. " +
-                    "Pick nodes on either sides of the hill and mark both as road cut. Everything between these two nodes will be its own section, " +
-                    "allowing you to apply double yellow no passing lines for just the hill.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Example mountains: In the mountains, the road is curvy and the grade is high. " +
-                    "There's a flat straight spot that you want to allow passing in, by marking the road with white dotted passing lines. " +
-                    "At the beginning of the flat straight section, mark the node as road cut. Now at the end of the flat straight section, mark this node as road cut. " +
-                    "This will create a road section between the two nodes, allowing you to apply white dotted passing lines for just the flat straight section.");
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
-                EditorGUILayout.LabelField(" = Resets settings to default.");
-                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.LabelField("Manual splitting", EditorStyles.boldLabel);
+                RenderHelpParagraph("With manual splitting on you mark the nodes to cut at yourself. The colliders that "
+                    + "result are larger and more complex than automatic splitting's, so check what collision costs in "
+                    + "play mode: if it is slow, cut at more nodes.");
+                RenderHelpParagraph("A hill you want double solid lines on: mark the node at each foot of the hill as "
+                    + "a road cut. What lies between them becomes a piece of its own, and the no-passing lines go on "
+                    + "that piece alone.");
+                RenderHelpParagraph("A straight in the mountains you want passing allowed on: mark the node at each "
+                    + "end of the straight. The piece between them takes the dotted line and the curves on either side "
+                    + "keep the solid one.");
+                RenderResetLegend();
                 EditorGUILayout.EndVertical();
             }
             else
@@ -1193,54 +1378,17 @@ namespace RoadCityMaster
             if (isShowingTerrainHelp)
             {
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Terrain options quick help:", EditorStyles.boldLabel);
-                if (GUILayout.Button("Manual", EditorStyles.miniButton, GUILayout.Width(120f)))
-                {
-                    RoadCityMaster.EditorUtilities.OpenOfflineManual();
-                }
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.HelpBox(onlineHelpDesc, MessageType.Info);
-                EditorGUILayout.LabelField("Terrain subtraction: ", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("This value, in meters, will be subtracted from the terrain match height to prevent z-fighting.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Spline magnitude limit: ", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Limits the magnitude of the spline nodes. Lower limit is better for typical roads with node seperation of around 100 to 300 meters. Higher limits will allow for less tension when using very spread out nodes.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Height Modification:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Enables or disables height matching for the terrain.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Active detail removal:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Enables or disables active detail removal. Memory intensive on large terrains with large amounts of details. Recommended to not use this option and instead remove details and trees via splat maps with other addons.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Active tree removal:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Enables or disables active tree removal. Memory intensive on large terrains with large amounts of trees. Recommended to not use this option and instead remove details and trees via splat maps with other addons.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Heights match width:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("The distance to the left and right of the road in which terrain heights will be matched to the road.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Details clear width:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("The distance between the road and detail, width wise, in which details will be removed.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Details clear height:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("The distance between the road and detail, height wise, in which details will be removed.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Tree clear width:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("The distance between the road and tree, width wise, in which trees will be removed.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Tree clear height:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("The distance between the road and tree, height wise, in which trees will be removed.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Store terrain history separate from scene:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("If enabled, stores the terrain history immediately on disk after use, saving memory while in editor.");
-                GUILayout.Space(4f);
-                EditorGUILayout.LabelField("Terrain history size:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Shows the size, in kilobytes, of the terrain history in memory or on disk.");
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
-                EditorGUILayout.LabelField(" = Resets settings to default.");
-                EditorGUILayout.EndHorizontal();
+                RenderHelpHeader("Terrain options quick help");
+                // B-5, fault 8. Eleven pairs stood here -- a control's name in bold over one sentence describing it --
+                // and all eleven are now that control's own hover, at the control. One of them was also WRONG, and had
+                // been for as long as it stood here: "Heights match width" was described as the distance to the left
+                // and right of the road, while TerraformingThreaded halves it into a distance either side, so an
+                // author who trusted this panel matched twice the ground they had asked for. That is the argument
+                // against a second copy of a field's description living where the field cannot correct it.
+                RenderHelpParagraph("Height matching WRITES to the terrain, and what it overwrote is kept in this "
+                    + "road's terrain history. That record is the only way the ground can be put back as it was, so "
+                    + "the size shown beside it is the price of being able to undo this road.");
+                RenderResetLegend();
                 EditorGUILayout.EndVertical();
             }
         }
@@ -1252,78 +1400,15 @@ namespace RoadCityMaster
             if (isShowingRoadHelp)
             {
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField("Road options quick help:", EditorStyles.boldLabel);
-                if (GUILayout.Button("Manual", EditorStyles.miniButton, GUILayout.Width(120f)))
-                {
-                    RoadCityMaster.EditorUtilities.OpenOfflineManual();
-                }
-                EditorGUILayout.HelpBox(onlineHelpDesc, MessageType.Info);
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Gizmos:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Enable or disable most gizmos for this road. Disable mesh collider gizmos via the unity menu if necessary or desired.", EditorStyles.miniLabel);
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Lanes:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Select the number of lanes for this road.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Lane width:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Modify the width per lane, in meters.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Road width:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Displays the road width without considering shoulders, in meters.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Shoulders enabled:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Enables or disables shoulders.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Shoulders width:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Modify the width of shoulders, in meters.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Road definition: ", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("The meter spacing between mesh triangles on the road and shoulder.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Use default materials: ", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("When enabled will use default materials for the road system, allowing certain aspects of generation to automatically determine the correct materials to utilize.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Max grade enforced: ", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("When enabled enforces a maximum grade on a per node basis.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Max road grade: ", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("The maximum road grade allowed on a per node basis.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Multithreading:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("When enabled allows for multi-threaded road generation.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.LabelField("Save mesh assets:", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("When enabled saves all generated meshes as .asset files.");
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(4f);
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
-                EditorGUILayout.LabelField(" = Resets settings to default.");
-                EditorGUILayout.EndHorizontal();
+                RenderHelpHeader("Road options quick help");
+                // B-5, fault 8, and the panel it emptied most: twelve pairs, each a control's name in bold over one
+                // sentence describing it, every one of them now on that control's own hover. This panel was also the
+                // fifth shape the four help headers came in -- it drew the heading and the Manual button with no
+                // horizontal group at all, so the button sat on its own line here and beside the heading everywhere
+                // else. What is left is the one note that points somewhere outside this inspector.
+                RenderHelpParagraph("The gizmo switch above covers this road's own gizmos. Mesh collider gizmos belong "
+                    + "to Unity, and are turned off in the scene view's own Gizmos menu.");
+                RenderResetLegend();
                 EditorGUILayout.EndVertical();
             }
         }

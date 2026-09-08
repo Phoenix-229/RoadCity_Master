@@ -41,6 +41,27 @@ namespace RoadCityMaster.City.Editor
     public static class CityBuildDispatchGate
     {
         #region "Entry"
+        // UnityEditor is reached fully qualified here, as UnityEditor.AssetDatabase already is below: inside
+        // namespace RoadCityMaster.City.Editor the bare identifier `Editor` binds to the NAMESPACE, so a
+        // `using UnityEditor;` beside `using System;` makes Object, Progress and BuildResult ambiguous (CS0104).
+        [UnityEditor.MenuItem("Window/Road City Master/Testing/City background building (no editor freeze)")]
+        public static void RunFromMenu()
+        {
+            string report;
+            if (Run(out report)) { Debug.Log(report); }
+            else { Debug.LogError(report); }
+        }
+
+        /// <summary> Headless entry point: Unity.exe -batchmode -quit -executeMethod
+        /// RoadCityMaster.City.Editor.CityBuildDispatchGate.RunBatch. Exits 1 on failure. </summary>
+        public static void RunBatch()
+        {
+            string report;
+            bool passed = Run(out report);
+            Debug.Log(report);
+            UnityEditor.EditorApplication.Exit(passed ? 0 : 1);
+        }
+
         public static bool Run(out string report)
         {
             List<string> failures = new List<string>();
@@ -124,6 +145,27 @@ namespace RoadCityMaster.City.Editor
                 }
             }
             return false;
+        }
+
+
+        /// <summary> How many non-comment lines carry <paramref name="needle"/>, by the same comment rule as
+        /// <see cref="AppearsInCode"/>. Presence is not enough where the claim is about a population: "no control in
+        /// this file reaches the build" is a statement about all of them, and the count is what says how many were
+        /// looked at. </summary>
+        private static int CodeLineCount(string source, string needle)
+        {
+            if (string.IsNullOrEmpty(source)) { return 0; }
+            int total = 0;
+            string[] lines = source.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string trimmed = lines[i].Trim();
+                if (trimmed.StartsWith("//", StringComparison.Ordinal)) { continue; }
+                if (trimmed.StartsWith("*", StringComparison.Ordinal)) { continue; }
+                if (trimmed.StartsWith("/*", StringComparison.Ordinal)) { continue; }
+                if (lines[i].IndexOf(needle, StringComparison.Ordinal) >= 0) { total++; }
+            }
+            return total;
         }
         #endregion
 
@@ -695,8 +737,58 @@ namespace RoadCityMaster.City.Editor
                 "the queue produced a different order on two identical runs: '" + firstRun + "' then '" + secondRun
                 + "'", failures);
 
+            // B-14's general requirement, made mechanical. The entry's own words: "every control reports" is a
+            // judgement about the remaining controls in the editor family, not a route problem. Judging 130 buttons in
+            // a paragraph is a judgement that rots on the next commit, so it is stated as the property that makes the
+            // judgement true instead: a control either finishes fast and leaves its result on screen, or it asks the
+            // queue -- and NO control may reach the build any other way. These three needles are the other ways.
+            // `TriggerRoadUpdate` and `RequestUpdate` are deliberately not among them: those ARE the funnels.
+            string[] family = { "Scripts/Editor/RoadEditor.cs", "Scripts/Editor/SplineNEditor.cs",
+                "Scripts/Editor/RoadIntersectionEditor.cs", "Scripts/Editor/RoadSystemEditor.cs",
+                "Scripts/Editor/TerrainEditor.cs", "Scripts/Editor/SplineCEditor.cs",
+                "Scripts/Editor/SaveWindow.cs", "Scripts/Editor/HelpWindow.cs" };
+            string[] silentDoors = { "UpdateRoad(", "TriggerSetup(", "ConstructRoad" };
+            int controlsJudged = 0, filesRead = 0, doorAt = 0;
+            for (int i = 0; i < family.Length; i++)
+            {
+                string editorSource = ReadSource(family[i]);
+                if (editorSource == null)
+                {
+                    failures.Add(family[i] + " cannot be read, so whether its controls reach the build silently is"
+                        + " unknown. If the file was renamed, rename it here too");
+                    continue;
+                }
+                filesRead++;
+                controlsJudged += CodeLineCount(editorSource, "GUILayout.Button")
+                    + CodeLineCount(editorSource, "GUI.Button") + CodeLineCount(editorSource, "GUILayout.Toggle");
+                for (int d = 0; d < silentDoors.Length; d++)
+                {
+                    Expect(!AppearsInCode(editorSource, silentDoors[d], out doorAt), family[i] + " reaches the build"
+                        + " through " + silentDoors[d] + " at line " + doorAt + ", which raises no ticket: the work"
+                        + " happens on the main thread with nothing named in Background Tasks and nothing to cancel."
+                        + " Ask through RequestUpdate() -- the same UpdateRoad behind a queued front door -- so the"
+                        + " control is distinguishable from a stub", failures);
+                }
+                // The one exception, pinned to the one file that is allowed it: RoadEditor's lazy gizmo-preview init,
+                // which builds a spline the inspector is about to draw and no road geometry at all. Pinned rather than
+                // exempted by name, so a second copy of it somewhere else is a failure rather than a precedent.
+                if (i > 0)
+                {
+                    Expect(!AppearsInCode(editorSource, "spline.Setup()", out doorAt),
+                        family[i] + " re-splines directly at line " + doorAt + ". Only RoadEditor's guarded gizmo"
+                        + " preview may, and only because it draws rather than builds", failures);
+                }
+            }
+            Expect(filesRead == family.Length, "only " + filesRead + " of the " + family.Length + " editors in the"
+                + " family were read, so this sweep judged part of the tool and reported on all of it", failures);
+            Expect(controlsJudged > 100, "the control count across the editor family fell to " + controlsJudged
+                + ". Either the family list above is stale or a whole inspector has gone: both make the claim that"
+                + " every control was judged untrue", failures);
+
             measured.Append("  C-06: landmark sequence '").Append(synchronous)
-                    .Append("' identical down both paths, queue order '").Append(firstRun).Append("' twice\n");
+                    .Append("' identical down both paths, queue order '").Append(firstRun).Append("' twice; ")
+                    .Append(controlsJudged).Append(" controls across ").Append(filesRead)
+                    .Append(" editors reach the build only through a funnel\n");
         }
 
 

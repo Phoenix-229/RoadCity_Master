@@ -66,6 +66,22 @@ namespace RoadCityMaster
         public SplineC spline;
 
         public int MostRecentNodeCount = -1;
+
+        /// <summary> RM-110. B-9. When this road last finished building, as UTC ticks; 0 on a road that has never been
+        /// built. Serialised, because "when was this last built" is a question an author asks about a road they opened
+        /// the scene to find, not only about one they just pressed a button on -- a non-serialised stamp would read as
+        /// "never built" for every road in a freshly loaded scene, which is the wrong answer and an alarming one.
+        ///
+        /// Ticks and not a `System.DateTime`, because Unity's serializer does not write one; the same name and the same
+        /// unit as <see cref="BuildStatus.lastBuildUtcTicks"/>, so the two cannot come to spell the same fact
+        /// differently.
+        ///
+        /// Written in exactly one place -- <see cref="ConstructionCleanup"/>, which every completing build passes
+        /// through and no cancelled or abandoned one reaches -- so the stamp cannot claim a build that did not finish.
+        /// Read-only to the author: it is an output of a build, and a field they could type into would be a record of
+        /// nothing. </summary>
+        [HideInInspector]
+        public long lastBuildUtcTicks = 0L;
         public GameObject splineObject;
         public RoadSystem roadSystem;
         public SplineC[] PiggyBacks = null;
@@ -75,6 +91,15 @@ namespace RoadCityMaster
         [SerializeField]
         public List<TerrainHistoryMaker> TerrainHistory;
         public string TerrainHistoryByteSize = "";
+
+        /// <summary> B-17. The pre-build ground, read back from disk on demand and never serialised. Separate from
+        /// <see cref="TerrainHistory"/> on purpose -- see <c>NaturalGroundRecords</c>, which explains why filling that
+        /// field instead would change which branch a road update takes. </summary>
+        [System.NonSerialized]
+        private List<TerrainHistoryMaker> naturalGroundRecords;
+
+        [System.NonSerialized]
+        private bool naturalGroundRecordsTried;
         [System.NonSerialized]
         public bool isUpdatingSpline = false;
 
@@ -93,14 +118,37 @@ namespace RoadCityMaster
         /// <summary> Width of the paved shoulder outside EACH outer lane, metres — the hard strip a vehicle pulls onto
         /// to clear the travelled way, and the surface that carries the cross-fall down to the ground.
         ///
-        /// A shoulder is narrower than a lane, and how much narrower is what tells the two apart on sight: ~0.5-1.0 m
-        /// on an urban street (a hard strip, not a refuge), 1.5-2.5 m on a collector or arterial, and 3.0-3.5 m only on
-        /// a highway or motorway, where it must hold a stopped lorry entirely clear of the traffic lane. Those are the
-        /// figures in <see cref="City.RoadClassDefaults"/>, per class, and this initialiser is the UrbanTwoLane row.
+        /// A shoulder is narrower than a lane, and how much narrower is what tells the two apart on sight. It is a
+        /// TWO-TIER figure with nothing in between: 0.6-1.2 m where the shoulder is only an edge strip for the pavement
+        /// to end against, and 3.0 m where the class gives a stopped vehicle a refuge — AASHTO's minimum usable
+        /// shoulder, which is the 2.44 m design vehicle plus a margin at each edge. Those are the figures in
+        /// <see cref="City.RoadClassDefaults"/>, per class, and this initialiser is the UrbanTwoLane row.
         ///
         /// RM-109. The legacy initialiser was 3 m against a 5 m lane. 3 m is a full urban lane width, so the shoulder
-        /// read as an extra lane rather than as a shoulder — which is exactly what it looked like in the scene. </summary>
-        public float shoulderWidth = 1f;
+        /// read as an extra lane rather than as a shoulder — which is exactly what it looked like in the scene.
+        ///
+        /// RM-110. B-10. The half-widths between the two tiers (1.5, 2.0, 2.5 m) were removed for the same reason and
+        /// this initialiser moved 1 m -> 1.2 m to sit on UrbanTwoLane exactly: 2.5 m is a lorry's width with no
+        /// clearance at all, so a vehicle stopped on it still overhangs the lane, yet at 71 % of the lane beside it the
+        /// strip is wide enough to be driven as one. A half-width shoulder is the one width that fails at both jobs.
+        /// </summary>
+        public float shoulderWidth = 1.2f;
+        /// <summary> RM-110. B-9. Cross-fall of the paved shoulder, as a fraction of its width: 0.04 is a 4 % fall away
+        /// from the carriageway edge. This is the control the author asked for and did not have -- the geometry code has
+        /// carried the cross-slope since RM-94, and the only figure reaching it was the constant default, so an author
+        /// could not steepen a shoulder for drainage or flatten one to meet an existing verge.
+        ///
+        /// A fraction rather than a percentage because that is how the rest of this component spells a slope
+        /// (<see cref="maxGrade"/> is 0.08 for an 8 % grade), and one vocabulary per component is what keeps a number
+        /// typed into one field meaning the same thing as the number beside it.
+        ///
+        /// The band and the clamp are NOT here. <see cref="CrossSection.CarriagewaySection.ShoulderFallMetres(double,double)"/>
+        /// clamps into AASHTO's 2 %-6 % shoulder band at the point of use and falls back to
+        /// <see cref="CrossSection.CarriagewaySection.ShoulderCrossSlopeNormal"/> for a zero or negative figure, so a
+        /// value assigned from script is bounded on exactly the same terms as one typed into the inspector -- the split
+        /// that RM-94 found between a declared range and a different clamp cannot reopen here, because there is only one
+        /// clamp and the inspector's band cites the constants it uses. </summary>
+        public float shoulderCrossSlope = 0.04f;
         /// <summary> Lanes running the spline's own direction. This carries the value of the old directionless
         /// <c>laneAmount</c> across through <see cref="FormerlySerializedAsAttribute"/>: on a road serialised before
         /// RM-89 the whole TOTAL arrives here and <see cref="lanesBackward"/> arrives as its unsplit sentinel, so
@@ -136,6 +184,36 @@ namespace RoadCityMaster
 
         /// <summary> Defines the width of height modification in meters </summary>
         public float matchHeightsDistance = 50f;
+
+        // B-12. The two controls that make the deformation's width a CONSEQUENCE rather than a constant. Before
+        // these existed the ground beside the carriageway was carried out to a fixed distance and written flat at
+        // road level, so a 0.2 m fill and a 3 m fill claimed the same ground and both ended in a step: the bulge
+        // the author reported. Now the reach is whatever the batter needs to reach natural ground -- see
+        // City/Runtime/Terrain/CutSlope.cs, which owns the march and the ratio maths -- and matchHeightsDistance
+        // above reverts to what its name says: how far the worker is allowed to LOOK, not how far it deforms.
+
+        /// <summary> Batter gradient as RUN per RISE: horizontal metres of slope for each vertical metre between the
+        /// carriageway edge and natural ground. 1.5:1 is ordinary stable-soil earthworks practice; steeper rock
+        /// cuts and flatter loose-soil fills retune it. This is the same quantity, in the same units, as
+        /// <see cref="City.CutSlopeClass.slopeRunPerRise"/>, which is what the march actually reads -- authored
+        /// here per road so one road may be cut steeply through rock and the next flattened into a field. </summary>
+        public float batterRunPerRise = 1.5f;
+
+        /// <summary> Ceiling on the batter's lateral reach, in metres each side. The reach is normally derived
+        /// (reach = height difference x batterRunPerRise); this stops a road perched above a valley from reshaping
+        /// the whole hillside, and where the batter would pass it the station is reported rather than run out
+        /// unbounded -- benching, retaining or re-aligning is the author's decision, not the tool's. </summary>
+        public float batterMaxReachMetres = 25f;
+
+        /// <summary> B-12, wired in B-14. The three footprint widths that used to be one number:
+        /// <see cref="City.TerrainFootprint"/> holds the maths, this holds the authored figures for THIS road, and
+        /// <c>TerraformingThreaded.DoRectsDo</c> reads the shoulder to size the flat band. Until this field existed the
+        /// flat band ended exactly at the painted carriageway edge and the batter broke from the paint line itself --
+        /// no shoulder, which no built road has -- and the class was live, gated maths with nothing in the build path
+        /// calling it. The shoulder is taken from INSIDE the look distance, not added beyond it, so the outer bound the
+        /// terraform buffers are sized from does not move. </summary>
+        public City.TerrainFootprintClass terrainFootprint = City.TerrainFootprintClass.Default();
+
         public float clearDetailsDistance = 30f;
         public float clearDetailsDistanceHeight = 5f;
         public float clearTreesDistance = 30f;
@@ -158,6 +236,17 @@ namespace RoadCityMaster
         /// (not substituted) so an upgraded road keeps its serialised lane counts and laneWidth unchanged; it lets a later
         /// class change refresh only the fields the author left at the outgoing class's default. </summary>
         [HideInInspector] public RoadClassEnum appliedRoadClass = RoadClassEnum.UrbanTwoLane;
+        /// <summary> B-15 / C-13. What this road is in the SETTLEMENT network -- main highway, intercity, town
+        /// connector or village connector -- as opposed to what its cross-section is (<see cref="roadClass"/>, just
+        /// above). The author draws and names the network by hand, and this is the field that tells the siting pass
+        /// which order of place belongs at this road's ends. See <see cref="SettlementRoleEnum"/> for why the two are
+        /// separate axes that must never be merged.
+        ///
+        /// Defaults to <see cref="SettlementRoleEnum.None"/>: a road authored before this field existed, and any road
+        /// the author has not classified, is not part of the settlement network and seeds nothing. Read only by the
+        /// settlement siting pass -- it changes no lane count, no width, no speed and nothing in the mesh or terraform
+        /// path. </summary>
+        public SettlementRoleEnum settlementRole = SettlementRoleEnum.None;
         /// <summary> When false this Road keeps its spline (and any edge objects / splinated
         /// meshes that ride it) but generates NO carriageway mesh and applies NO road terrain
         /// deformation. This is the carrier used by rail / ropeway / centreline road classes. </summary>
@@ -672,17 +761,12 @@ namespace RoadCityMaster
         }
 
 
-        public void EditorCameraSetSingle()
-        {
-            if (editorPlayCamera == null)
-            {
-                Camera[] editorCameras = EngineIntegration.FindObjectsByType<Camera>();
-                if (editorCameras != null && editorCameras.Length == 1)
-                {
-                    editorPlayCamera = editorCameras[0];
-                }
-            }
-        }
+        // B-6 removed EditorCameraSetSingle(). It filled `editorPlayCamera` with the scene's only camera, and its one
+        // caller was the inspector -- which called it WHILE DRAWING, so selecting a road wrote a scene reference with no
+        // undo step behind it, every repaint, forever, in any scene that had no single camera to find. The pick is an
+        // author-pressed button now, in `LegacyInspectorShell.CameraField`, shared with the road system's own camera
+        // field; it writes the serialized property rather than this field, which is what puts the pick in the undo
+        // stack. What counts as an obvious camera is still stated once, in `EngineIntegration.OnlySceneCamera`.
 
 
         public void QuitEditorCamera()
@@ -1111,8 +1195,155 @@ namespace RoadCityMaster
 
 
         #region "Terrain history"
+        /// <summary> B-17. The pre-build ground records to read a floor from -- the live list while a build still holds
+        /// it, and otherwise the copy on disk, loaded once and kept for the session.
+        ///
+        /// The disk copy is not an edge case: <see cref="isSavingTerrainHistoryOnDisk"/> is ON by default, and
+        /// <c>StoreTerrainHistory</c> parks the list and nulls the field as its last act, so for most projects
+        /// <see cref="TerrainHistory"/> is empty from the moment a build finishes. A floor that only worked with that
+        /// option turned off would not have fixed anything.
+        ///
+        /// Deliberately NOT loaded into the <see cref="TerrainHistory"/> field. <c>UpdateRoad</c> reads that field being
+        /// null as "no history parked, so terraform" -- filling it here would silently divert the build to
+        /// <c>ConstructRoad2</c> whenever the road system's terrain switch is off. This cache is read-only, not
+        /// serialised, and is dropped whenever a build stores fresh history so the next read picks the new ground up.
+        /// </summary>
+        private List<TerrainHistoryMaker> NaturalGroundRecords()
+        {
+            if (TerrainHistory != null && TerrainHistory.Count > 0) { return TerrainHistory; }
+            if (naturalGroundRecords != null) { return naturalGroundRecords; }
+            if (naturalGroundRecordsTried) { return null; }
+
+            naturalGroundRecordsTried = true;
+            naturalGroundRecords = TerrainHistoryUtility.LoadTerrainHistory(this);
+            return naturalGroundRecords;
+        }
+
+
+        /// <summary> B-17. Forgets the loaded pre-build ground, so the next read takes it from disk again. Called where
+        /// a build has just written new history: the ground the road was laid on has changed, and a cached copy of the
+        /// old one would put the floor under the wrong surface. </summary>
+        private void ForgetNaturalGround()
+        {
+            naturalGroundRecords = null;
+            naturalGroundRecordsTried = false;
+        }
+
+
+        /// <summary> B-17. The ground here BEFORE this road touched it, in world metres, or false where this road has
+        /// no record of it.
+        ///
+        /// This closes the ratchet. <c>RoadNodeGround.MinimumY</c> samples the live terrain, and after one build the
+        /// live terrain under a road is ground the road itself raised -- so a floor measured from it sits at the
+        /// carriageway, the node can never be lowered again, and every rebuild lifts the floor a little further. The
+        /// pre-build surface is not lost: the terraform records the height of every cell it is about to overwrite in
+        /// <see cref="TerrainHistory"/>, which is what the undo path restores from. Read for a floor it is the natural
+        /// ground the road was laid on, which is the surface the author's elevation figure was always measured against.
+        ///
+        /// It is the ground before the ROAD and not merely before the last build because
+        /// <c>RoadUtility.MergeHeightRecord</c> keeps the earliest height it holds for a cell. Before that it did not:
+        /// each build replaced the record with the heightmap as that build found it, so the record of virgin ground was
+        /// overwritten by the previous build's embankment and this floor would have climbed one build at a time -- the
+        /// same ratchet, one step slower.
+        ///
+        /// False, not a guess, when there is no record -- the road has never been built, or the node has since moved off
+        /// the corridor. The caller then falls back to the live surface, which is what it used before this existed, so
+        /// nothing that worked stops working.
+        ///
+        /// The search is linear over the recorded cells and stops at the first exact hit. That is a scan of one road's
+        /// own corridor, on demand, from an inspector repaint or a single node move -- not something any per-frame or
+        /// per-vertex path runs. </summary>
+        public bool NaturalGroundY(Vector3 _worldPosition, out float _worldY)
+        {
+            _worldY = 0f;
+            List<TerrainHistoryMaker> records = NaturalGroundRecords();
+            if (records == null || records.Count < 1) { return false; }
+
+            Terrain terrain = RoadNodeGround.TerrainUnder(_worldPosition);
+            if (terrain == null || terrain.terrainData == null) { return false; }
+
+            RoadTerrain roadTerrain = terrain.GetComponent<RoadTerrain>();
+            if (roadTerrain == null) { return false; }
+
+            TerrainHistoryMaker history = null;
+            int historyCount = records.Count;
+            for (int i = 0; i < historyCount; i++)
+            {
+                if (records[i] != null && records[i].terrainID == roadTerrain.UID)
+                {
+                    history = records[i];
+                    break;
+                }
+            }
+            if (history == null || history.Count < 1 || history.x1 == null || history.y1 == null
+                || history.height == null)
+            {
+                return false;
+            }
+
+            int wantedFirst, wantedSecond;
+            RoadNodeGround.ToHeightmapCell(_worldPosition, terrain.transform.position, terrain.terrainData.size,
+                history.heightmapResolution, out wantedFirst, out wantedSecond);
+
+            int cells = history.Count;
+            if (cells > history.x1.Length) { cells = history.x1.Length; }
+            if (cells > history.y1.Length) { cells = history.y1.Length; }
+            if (cells > history.height.Length) { cells = history.height.Length; }
+
+            for (int i = 0; i < cells; i++)
+            {
+                if (history.x1[i] != wantedFirst || history.y1[i] != wantedSecond) { continue; }
+                _worldY = RoadNodeGround.FromHeightmap01(history.height[i],
+                    RoadNodeGround.BaseY(terrain), terrain.terrainData.size.y);
+                return true;
+            }
+            return false;
+        }
+
+
+        /// <summary> B-17. The lowest world Y a node of THIS road may sit at, given the depth its author asked for.
+        /// The same rule as <c>RoadNodeGround.MinimumY</c>, applied to the road's own pre-build ground where that is
+        /// known, so the floor does not climb with each rebuild. The rule itself is not restated here -- only which
+        /// surface it is applied to. </summary>
+        public float NodeFloorY(Vector3 _worldPosition, float _authoredOffsetMetres)
+        {
+            float natural;
+            if (NaturalGroundY(_worldPosition, out natural))
+            {
+                return RoadNodeGround.FloorFromSurface(natural, _authoredOffsetMetres);
+            }
+            return RoadNodeGround.MinimumY(_worldPosition, _authoredOffsetMetres);
+        }
+
+
+        /// <summary> B-17. The surface a node's authored elevation is measured from: this road's pre-build ground where
+        /// it is recorded, and the live surface otherwise. Negative infinity where no terrain covers the position, on
+        /// the same terms as <c>RoadNodeGround.SurfaceYUnder</c>. </summary>
+        public float NodeGroundY(Vector3 _worldPosition)
+        {
+            float natural;
+            if (NaturalGroundY(_worldPosition, out natural)) { return natural; }
+            return RoadNodeGround.SurfaceYUnder(_worldPosition);
+        }
+
+
+        /// <summary> B-17. A node position of this road, raised clear of the road's own floor. What the drag path needs:
+        /// the plain lift measures from the live surface, which on a built road is the carriageway the road raised, so
+        /// a node dragged down was put straight back and the author was told nothing. </summary>
+        public Vector3 LiftNode(Vector3 _worldPosition, float _authoredOffsetMetres)
+        {
+            return RoadNodeGround.LiftToFloor(_worldPosition, NodeFloorY(_worldPosition, _authoredOffsetMetres));
+        }
+
+
         public void StoreTerrainHistory(bool _isDiskOnly = false)
         {
+            // B-17. The record this build is about to write covers cells the cached copy has never seen -- the corridor
+            // moves, and RoadUtility.MergeHeightRecord adds to the record rather than replacing it. The heights already
+            // in it do not change (the merge keeps the earliest per cell), so this is dropped to pick the NEW CELLS up,
+            // not because the old ones went stale.
+            ForgetNaturalGround();
+
             if (!_isDiskOnly)
             {
                 Road road = this;
@@ -1193,6 +1424,11 @@ namespace RoadCityMaster
                     Terraforming.ProcessRoadTerrainHook2(spline, ref EditorTTDList);
                     //Store history.
                     StoreTerrainHistory();
+                    // B-14. The same report as the threaded path's, in the same position: after the pass has been taken
+                    // into the Terrain. Both branches terraform, so a truncated slope has to be reported from both --
+                    // one of the two staying quiet is exactly the kind of split that makes a warning look intermittent.
+                    ReportTruncatedBatters();
+                    ReportRefusedCuts();
                     int editorTTDListCount = EditorTTDList.Count;
                     for (int i = 0; i < editorTTDListCount; i++)
                     {
@@ -1238,6 +1474,9 @@ namespace RoadCityMaster
                 Terraforming.ProcessRoadTerrainHook2(spline, ref EditorTTDList);
                 StoreTerrainHistory();
 
+                ReportTruncatedBatters();
+                ReportRefusedCuts();
+
                 EditorTTDList.Clear();
                 EditorTTDList = null;
                 System.GC.Collect();
@@ -1254,6 +1493,56 @@ namespace RoadCityMaster
             RoadCalcsJob1 = new Threading.RoadCalcs1();
             RoadCalcsJob1.Setup(ref RCS, ref road);
             RoadCalcsJob1.Start();
+        }
+
+
+        /// <summary> B-14. Says out loud that a side slope was cut off before it reached the ground.
+        ///
+        /// B-12 made the batter reach a consequence of its gradient rather than a fixed distance, and capped that reach
+        /// at <see cref="batterMaxReachMetres"/> so a road perched over a valley does not reshape the whole hillside.
+        /// Where the cap binds, the slope stops in mid-air and the ground below it is left flat --
+        /// <c>TerraformingThreaded.BatterHandBackCount</c> counts exactly those station/side pairs. Nothing read that
+        /// count, so the tool made the decision to truncate, recorded it, and told nobody: the author's only evidence
+        /// was a flat shelf they had to notice in the Scene view and correctly attribute.
+        ///
+        /// It is a WARNING and not an error because truncating is a legitimate outcome -- real practice benches,
+        /// retains or re-aligns at that point, and which of the three to do is the author's call, not the tool's. The
+        /// message therefore names the two fields that decide it and stops; nothing here changes the geometry. Read on
+        /// the main thread, after the pass has been taken into the Terrain, which is the only place the figure is
+        /// settled. </summary>
+        private void ReportTruncatedBatters()
+        {
+            int handedBack = Threading.TerraformingThreaded.BatterHandBackCount;
+            if (handedBack < 1) { return; }
+
+            Debug.LogWarning("Road & City Master: the side slope on \"" + name + "\" was cut off before it reached "
+                + "natural ground at " + handedBack + " point(s), so the terrain below those points is left flat "
+                + "instead of sloped. The slope is stopped at Batter max reach (" + batterMaxReachMetres.ToString("0.##")
+                + " m each side, itself capped at half of Match heights distance). Widen that reach, steepen Batter "
+                + "gradient (currently " + batterRunPerRise.ToString("0.##") + ":1), or lower the road here -- real "
+                + "practice benches, retains or re-aligns where a slope cannot daylight.", this);
+        }
+
+
+        /// <summary> B-17. Says out loud that the ground could not follow the road all the way down.
+        ///
+        /// The author's complaint was that pulling a node's elevation down left the terrain standing above the road. One
+        /// cause is a hard limit rather than a bug: a heightmap cannot be written below its own tile's base plane, so a
+        /// cut deeper than the tile can represent is a cut that cannot be granted.
+        /// <c>TerraformingThreaded.CutFloorCount</c> counts those samples and
+        /// <c>TerraformingThreaded.WorstCutShortfallMetres</c> measures the worst of them.
+        ///
+        /// A WARNING for the same reason the truncated batter is one: all three ways out of it -- lower the terrain
+        /// object, extend its height range, raise the road -- are the author's call and not the tool's, and the message
+        /// names all three. Read on the main thread, after the pass has been taken into the Terrain, which is where the
+        /// figure is settled. </summary>
+        private void ReportRefusedCuts()
+        {
+            int refused = Threading.TerraformingThreaded.CutFloorCount;
+            if (refused < 1) { return; }
+
+            Debug.LogWarning(RoadNodeGround.CutRefusedMessage(name, refused,
+                Threading.TerraformingThreaded.WorstCutShortfallMetres), this);
         }
 
 
@@ -1308,6 +1597,15 @@ namespace RoadCityMaster
             AbortJobs();
 
             isEditorConstructing = false;
+
+            // RM-110. B-9. The one place the road stamps when it finished. This method is reached by all three ways a
+            // build completes -- the spline-only carrier's early return, the single-threaded full pass, and
+            // ConstructRoad4 at the end of the staged one -- and by none of the ways one ends without a result:
+            // CancelBuild, the runaway guard and the error path all clear isEditorConstructing and return without
+            // coming here. So the stamp means "this road was built and applied", which is the only reading of it that
+            // is any use to an author.
+            lastBuildUtcTicks = System.DateTime.UtcNow.Ticks;
+
             int nodeCount = spline.GetNodeCount();
             SplineN node;
             for (int i = 0; i < nodeCount; i++)
@@ -1420,6 +1718,68 @@ namespace RoadCityMaster
         public float RoadWidth()
         {
             return (laneWidth * (float)LaneTotal());
+        }
+
+
+        /// <summary> RM-110. B-9. Reused by <see cref="MeshTally"/>, which an inspector calls on every repaint of an
+        /// open measurements foldout. `GetComponentsInChildren` allocates a fresh array per call, and a road carries a
+        /// mesh child per carriageway, shoulder, intersection plate and edge object -- an allocation that size, several
+        /// times a second, for a figure the author is only reading, is garbage the act of looking at a road produces.
+        /// Static because only one inspector is drawn at a time and the list is cleared before every use. </summary>
+        private static readonly List<MeshFilter> tallyFilters = new List<MeshFilter>();
+
+        /// <summary> RM-110. B-9. How much geometry this road's build actually produced: vertices and triangles across
+        /// every mesh under it, inactive children included.
+        ///
+        /// MEASURED from the meshes on each call, not stored at build time and read back. A stored count is a second
+        /// copy of a fact the scene already holds, and it goes stale in ways nothing reports: an author deletes an edge
+        /// object, an undo puts a mesh back, a prefab revert swaps one out, a scene is opened whose roads were built by
+        /// an older version -- and the number carries on being displayed as though it were current. Nothing can be
+        /// stale about a figure that is summed from what is there.
+        ///
+        /// `GetIndexCount` and not `Mesh.triangles`: the property builds and returns a fresh int array of every index
+        /// in the mesh, which for a long road is megabytes allocated to divide one number by three. Index count over
+        /// three is the triangle count for triangle topology, and a submesh with any other topology is skipped rather
+        /// than counted wrongly -- a line or point submesh has indices and no triangles, so dividing its index count by
+        /// three would invent triangles that were never drawn.
+        ///
+        /// `sharedMesh` and never `mesh`: reading the latter from the editor INSTANTIATES a copy of the mesh and leaks
+        /// it, which would mean an author who opens a foldout leaves a duplicate mesh behind every repaint. </summary>
+        public void MeshTally(out int vertices, out int triangles)
+        {
+            vertices = 0;
+            triangles = 0;
+
+            tallyFilters.Clear();
+            GetComponentsInChildren<MeshFilter>(true, tallyFilters);
+
+            for (int i = 0; i < tallyFilters.Count; i++)
+            {
+                Mesh mesh = tallyFilters[i].sharedMesh;
+                if (mesh == null) { continue; }
+
+                vertices += mesh.vertexCount;
+                for (int s = 0; s < mesh.subMeshCount; s++)
+                {
+                    if (mesh.GetTopology(s) != MeshTopology.Triangles) { continue; }
+                    triangles += (int)(mesh.GetIndexCount(s) / 3u);
+                }
+            }
+            tallyFilters.Clear();
+        }
+
+
+        /// <summary> RM-110. B-9. When this road last finished building, in the author's own local time, or null when it
+        /// never has. One place the tick stamp is turned into words, so two surfaces cannot format it differently.
+        ///
+        /// Local and not UTC: the stamp is stored in UTC because that is the only form that survives a scene moving
+        /// between machines, and it is READ by somebody sitting in front of the editor, to whom "14:32" means the time
+        /// they saw on their own clock. </summary>
+        public string LastBuildLocalText()
+        {
+            if (lastBuildUtcTicks == 0L) { return null; }
+            return new System.DateTime(lastBuildUtcTicks, System.DateTimeKind.Utc).ToLocalTime()
+                .ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
         }
 
 

@@ -328,6 +328,19 @@ namespace RoadCityMaster.City
         public ContentCatalog BuildCatalog(ContentValidationCache cache)
         {
             ContentCatalog catalog = new ContentCatalog();
+            RegisterInto(catalog, cache);
+            return catalog;
+        }
+
+        /// <summary> The same wiring, added to a catalogue that already exists, for the case a settlement names several
+        /// sets: a city with a buildings library and a street-furniture library resolves out of one catalogue, not two,
+        /// and two sets that both name a category contribute to the same pool rather than one hiding the other.
+        ///
+        /// Split out of <see cref="BuildCatalog(ContentValidationCache)"/> rather than copied beside it, so the rule that
+        /// only a cached PASS is placeable is stated in exactly one place. </summary>
+        public void RegisterInto(ContentCatalog catalog, ContentValidationCache cache)
+        {
+            if (catalog == null) { return; }
             IList<string> keys = Categories();
             for (int k = 0; k < keys.Count; k++)
             {
@@ -342,7 +355,6 @@ namespace RoadCityMaster.City
                     catalog.Register(c);
                 }
             }
-            return catalog;
         }
     }
 }

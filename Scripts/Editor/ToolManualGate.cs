@@ -12,18 +12,20 @@ namespace RoadCityMaster
 {
     /// <summary> RM-65's gate: proves the manual cannot be wrong about the things a manual is usually wrong about.
     ///
-    /// Eleven cases. The field reference IS RM-51's registry rather than a transcription of it, so a documented field
+    /// Twelve cases. The field reference IS RM-51's registry rather than a transcription of it, so a documented field
     /// cannot drift out of the inspector; every documented field carries a unit and a range with a named source; the
     /// spot check RM-65 asks for is run EXHAUSTIVELY rather than on a sample of ten, which is strictly stronger; range
     /// text is invariant-formatted, so a comma-decimal machine cannot generate a different manual (C-06); every refusal
     /// names its wording, its reason and at least two ways out, and its id is stable and ordered; the cited-standards
     /// table has exactly one row per Cite line in § 10; no row invents an edition -- a source the project has not
-    /// adopted says so in the words the register reserves for it; all three tables are well formed; the hand-written
-    /// prose still states the exclusions and carries the licence and attribution; and the document on disk still matches
-    /// all three registers. Report lines are prefixed RCMMANUAL.
+    /// adopted says so in the words the register reserves for it; all four tables are well formed; the hand-written
+    /// prose still states the exclusions and carries the licence and attribution; the document on disk still matches
+    /// all four registers; and the menu map is reflected from the attributes rather than counted, which is B-20's fix
+    /// for a manual that stated two different menu totals for the same tree. Report lines are prefixed RCMMANUAL.
     ///
     /// What it does NOT prove: that the prose is good, or that the four walkthroughs work when followed in the editor.
     /// A reader following them is RM-65's human half; this gate proves the reference half cannot be stale. </summary>
+
     public static class ToolManualGate
     {
         [MenuItem("Window/Road City Master/Testing/Manual against the registers")]
@@ -61,6 +63,7 @@ namespace RoadCityMaster
             CaseTablesAreWellFormed(builder, failures);
             CaseProseStatesExclusionsAndLicence(builder, failures);
             CaseDocumentMatchesRegisters(builder, failures);
+            CaseMenuMapIsReflected(builder, failures);
 
             foreach (string failure in failures)
             {
@@ -189,9 +192,9 @@ namespace RoadCityMaster
             FieldDescriptor probe = new FieldDescriptor("Probe", "probeField", "Probe field",
                 FieldGroup.WhatItDoesToTheWorld, FieldUnit.Fraction,
                 FieldRange.Between(0.0, 0.15, "AUTHORED: probe"));
-            Expect(ManualReferences.RangeText(probe) == "0 to 0.15 frac",
+            Expect(ManualReferences.RangeText(probe) == "0 to 0.15 fraction",
                 "case4: a bounded fractional range renders as '" + ManualReferences.RangeText(probe)
-                + "' rather than '0 to 0.15 frac'", failures);
+                + "' rather than '0 to 0.15 fraction'", failures);
 
             FieldDescriptor half = new FieldDescriptor("Probe", "probeMin", "Probe min",
                 FieldGroup.WhatItIs, FieldUnit.Metres, FieldRange.AtLeast(2.5, "AUTHORED: probe"));
@@ -347,6 +350,8 @@ namespace RoadCityMaster
                 ManualReferences.Refusals().Count, builder, failures);
             CheckTable("standards", ManualReferences.StandardsTable(), 6,
                 ManualReferences.Standards().Count, builder, failures);
+            CheckTable("menus", MenuMapRegister.MapTable(), 3,
+                MenuMapRegister.RowCount(), builder, failures);
         }
 
         private static void CheckTable(string name, string table, int pipesPerLine, int rowCount,
@@ -454,6 +459,53 @@ namespace RoadCityMaster
 
             builder.Append("RCMMANUAL case11 ").Append(matched).Append(" of ").Append(ToolManualWriter.TableCount)
                    .Append(" generated tables on disk match the registers exactly\n");
+        }
+
+        /// <summary> Case 12. B-20's fix, asserted where it cannot rot: the menu map is REFLECTED from the attributes,
+        /// never counted. The manual said 126 items in one section and 134 in another for the same tree, and both
+        /// numbers were counted by hand -- which is short by construction here, because five paths are declared as a
+        /// <c>const string</c> and referenced by name, so a text search for the attribute never sees them.
+        ///
+        /// A count alone would still have been a number somebody typed. These are the claims a count cannot make: one
+        /// menu root (RM-108), no path registered twice, a table whose group rows add up to its own total, and every gate
+        /// in the suite reachable from the menu on its own -- which is what the manual says about the suite, and what
+        /// nothing checked until two City build gates had run for a topic with no menu item at all. </summary>
+        private static void CaseMenuMapIsReflected(StringBuilder builder, List<string> failures)
+        {
+            List<string> outside = MenuMapRegister.PathsOutsideTheRoot();
+            Expect(outside.Count == 0,
+                "case12: " + outside.Count + " menu item(s) sit outside '" + MenuMapRegister.Root + "': "
+                + string.Join(", ", outside.ToArray()), failures);
+
+            List<string> repeated = MenuMapRegister.DuplicatePaths();
+            Expect(repeated.Count == 0,
+                "case12: a menu path is registered more than once: " + string.Join(", ", repeated.ToArray()),
+                failures);
+
+            List<string> orphans = MenuMapRegister.GatesWithoutMenuItem();
+            Expect(orphans.Count == 0,
+                "case12: " + orphans.Count + " gate(s) in the suite carry no menu item of their own, so they can only"
+                + " be run as part of the whole sweep: " + string.Join(", ", orphans.ToArray()), failures);
+
+            List<string> groups = MenuMapRegister.Groups();
+            int summed = 0;
+            foreach (string group in groups) { summed += MenuMapRegister.CountIn(group); }
+            Expect(summed == MenuMapRegister.Total(),
+                "case12: the groups hold " + summed + " items but the register counts " + MenuMapRegister.Total(),
+                failures);
+
+            bool topFirst = groups.Count > 0 && groups[0] == MenuMapRegister.TopLevel;
+            Expect(topFirst, "case12: the menu map does not list the top level first", failures);
+
+            Expect(MenuMapRegister.MapTable().Contains("| **Total** | **" + MenuMapRegister.Total() + "** |"),
+                "case12: the generated menu table does not state the reflected total", failures);
+
+            int submenus = topFirst ? groups.Count - 1 : groups.Count;
+            builder.Append("RCMMANUAL case12 ").Append(MenuMapRegister.Total())
+                   .Append(" menu items reflected from the attributes: ")
+                   .Append(MenuMapRegister.CountIn(MenuMapRegister.TopLevel)).Append(" at the top level and ")
+                   .Append(submenus).Append(" submenus; gates with no menu item of their own: ")
+                   .Append(orphans.Count).Append("\n");
         }
     }
 }

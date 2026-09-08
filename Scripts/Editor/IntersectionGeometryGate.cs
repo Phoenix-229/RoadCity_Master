@@ -85,6 +85,10 @@ namespace RoadCityMaster
             CaseABlockedTriangleNamesTheObjectAndLeavesItAlone(builder, failures);
             CaseTheSkewLimitIsQuotedWithItsSource(builder, failures);
             CaseTheTurnBayTakesItsTaperFromTheOneOwner(builder, failures);
+            CaseTheFormDecidesTheControlAndTheStopTypeItAllows(builder, failures);
+            CaseTheRoundaboutMinimumDiameterIsDerivedFromTheClass(builder, failures);
+            CaseTheRoundaboutRefusesEachWayItCanFailAndQuotesTheFigure(builder, failures);
+            CaseTheInterchangeSeparatesRaisesTheMinorRoadAndMarksASpan(builder, failures);
             CaseDeterministic(builder, failures);
 
             foreach (string failure in failures)
@@ -759,6 +763,371 @@ namespace RoadCityMaster
                 "{5:F2} m", storage, taper, flare, speed, floor, trucky));
         }
 
+        // ---- B-16: the junction form ----
+
+        /// <summary> Case 14. The FORM is authored and the control is DERIVED from it, so the mapping is asserted in one
+        /// direction only: each of the four forms yields exactly one control, and the two forms that share a road surface
+        /// are the two at-grade ones. This is a gate because the alternative was a duplicate -- naming priority,
+        /// signalised, roundabout and interchange as four more STOP TYPES would have shadowed `intersectionStopType`,
+        /// whose four values already exist and are read by every traffic-light path in this editor. The form constrains
+        /// those values instead of replacing them, and the constraint is said by name: a roundabout has no stop line to
+        /// sign, and at an interchange the two roads never meet, so neither has anything to signal. </summary>
+        private static void CaseTheFormDecidesTheControlAndTheStopTypeItAllows(StringBuilder builder,
+            List<string> failures)
+        {
+            Expect(JunctionForm.ControlFor(JunctionTypeEnum.Priority) == JunctionControl.StopOrYield,
+                "form: a priority junction did not resolve to stop-or-yield control", failures);
+            Expect(JunctionForm.ControlFor(JunctionTypeEnum.Signalised) == JunctionControl.Signals,
+                "form: a signalised junction did not resolve to signal control", failures);
+            Expect(JunctionForm.ControlFor(JunctionTypeEnum.Roundabout) == JunctionControl.EntryYield,
+                "form: a roundabout did not resolve to entry-yield control", failures);
+            Expect(JunctionForm.ControlFor(JunctionTypeEnum.GradeSeparatedInterchange) == JunctionControl.Uncontrolled,
+                "form: an interchange did not resolve to uncontrolled", failures);
+            Expect(JunctionForm.IsAtGrade(JunctionTypeEnum.Priority)
+                   && JunctionForm.IsAtGrade(JunctionTypeEnum.Signalised),
+                "form: a priority or signalised junction was not reported as at-grade", failures);
+            Expect(!JunctionForm.IsAtGrade(JunctionTypeEnum.Roundabout)
+                   && !JunctionForm.IsAtGrade(JunctionTypeEnum.GradeSeparatedInterchange),
+                "form: a roundabout or an interchange was reported as at-grade", failures);
+
+            CheckTheStopTypesEachFormAllows(failures);
+            Line(builder, "form", "four forms, one control each, and the stop types each form allows");
+        }
+
+
+        /// <summary> The stop-type half of case 14, on a throwaway component because the compatibility rule lives on
+        /// <see cref="RoadIntersection"/> beside the two fields it compares. RoadIntersection carries no
+        /// ExecuteInEditMode attribute, so AddComponent runs no lifecycle method here and the probe costs one GameObject
+        /// that is destroyed in the finally. </summary>
+        private static void CheckTheStopTypesEachFormAllows(List<string> failures)
+        {
+            GameObject host = new GameObject("RCMJUNCTION probe form");
+            try
+            {
+                RoadIntersection junction = host.AddComponent<RoadIntersection>();
+                string refusal;
+
+                junction.junctionType = JunctionTypeEnum.Signalised;
+                junction.intersectionStopType = RoadIntersection.iStopTypeEnum.TrafficLight2;
+                Expect(junction.StopTypeIsCompatible(out refusal),
+                    Fmt("form: a signalised junction refused a traffic light -- {0}", refusal), failures);
+                junction.intersectionStopType = RoadIntersection.iStopTypeEnum.StopSign_AllWay;
+                Expect(!junction.StopTypeIsCompatible(out refusal) && refusal.Length > 0,
+                    "form: a signalised junction accepted an all-way stop sign, or refused it without saying why",
+                    failures);
+
+                junction.junctionType = JunctionTypeEnum.Roundabout;
+                junction.intersectionStopType = RoadIntersection.iStopTypeEnum.None;
+                Expect(junction.StopTypeIsCompatible(out refusal),
+                    Fmt("form: a roundabout refused an unsigned entry -- {0}", refusal), failures);
+                junction.intersectionStopType = RoadIntersection.iStopTypeEnum.TrafficLight1;
+                Expect(!junction.StopTypeIsCompatible(out refusal) && refusal.Length > 0,
+                    "form: a roundabout accepted signal heads on its entries", failures);
+
+                junction.junctionType = JunctionTypeEnum.GradeSeparatedInterchange;
+                junction.intersectionStopType = RoadIntersection.iStopTypeEnum.TrafficLight1;
+                Expect(!junction.StopTypeIsCompatible(out refusal) && refusal.Length > 0,
+                    "form: an interchange accepted signals at a crossing its roads never share", failures);
+
+                junction.junctionType = JunctionTypeEnum.Priority;
+                junction.intersectionStopType = RoadIntersection.iStopTypeEnum.StopSign_AllWay;
+                Expect(junction.StopTypeIsCompatible(out refusal),
+                    Fmt("form: a priority junction refused a stop sign -- {0}", refusal), failures);
+                junction.intersectionStopType = RoadIntersection.iStopTypeEnum.TrafficLight1;
+                Expect(!junction.StopTypeIsCompatible(out refusal)
+                       && refusal.IndexOf("Signalised", StringComparison.Ordinal) >= 0,
+                    "form: a priority junction carrying a signal was not told which form it needs instead", failures);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(host); }
+        }
+
+
+        /// <summary> Case 15. The smallest inscribed circle a roundabout can be built at is DERIVED from figures the class
+        /// already publishes rather than authored as a thirteenth field. Two bounds have to hold and the larger governs:
+        /// the ring must leave a positive central island (ICD > 2 x circulatory width), and the circulating CENTRELINE,
+        /// which sits at ICD/2 - width/2, must not be tighter than the class's minimum circulatory radius
+        /// (ICD >= 2R + width). At the default class the second governs, at 28.95 m.
+        ///
+        /// The identity is what makes that a derivation rather than a guess, so it is asserted directly: at exactly the
+        /// minimum, the circulating centreline radius EQUALS the class minimum to a nanometre. The case also reproduces
+        /// the 13.5 m centreline the class's own documentation quotes at an ICD of 32 m, which ties the algebra to the
+        /// shipped text -- if either drifts, one of those two numbers moves. </summary>
+        private static void CaseTheRoundaboutMinimumDiameterIsDerivedFromTheClass(StringBuilder builder,
+            List<string> failures)
+        {
+            RoundaboutClass cls = RoundaboutClass.Default();
+            double width = RoundaboutGeometry.CirculatoryWidthMetres(cls);
+            double minimum = JunctionForm.MinimumInscribedDiameterMetres(cls);
+            double radiusBound = 2.0 * cls.minCirculatoryRadiusMetres + width;
+
+            Expect(Math.Abs(minimum - radiusBound) < 1e-9,
+                Fmt("minimum ICD: the radius bound governs at the default class, so the minimum should be {0:R} m and"
+                    + " not {1:R} m", radiusBound, minimum), failures);
+            Expect(minimum > 2.0 * width,
+                Fmt("minimum ICD: {0:R} m leaves no central island at a {1:R} m circulatory width", minimum, width),
+                failures);
+
+            double centrelineAtMinimum = minimum * 0.5 - width * 0.5;
+            Expect(Math.Abs(centrelineAtMinimum - cls.minCirculatoryRadiusMetres) < 1e-9,
+                Fmt("minimum ICD: at the minimum the circulating centreline is {0:R} m, not the class minimum {1:R} m",
+                    centrelineAtMinimum, cls.minCirculatoryRadiusMetres), failures);
+
+            double centrelineAt32 = 32.0 * 0.5 - width * 0.5;
+            Expect(Math.Abs(centrelineAt32 - 13.5) < 0.05,
+                Fmt("minimum ICD: an ICD of 32 m gives a {0:F3} m centreline, and the class documents 13.5 m",
+                    centrelineAt32), failures);
+
+            // A wider ring has to demand a wider circle. Both bounds carry the width, so no roundabout can be squeezed
+            // into a smaller circle by widening its carriageway.
+            RoundaboutClass wider = RoundaboutClass.Default();
+            wider.entryWidthMetres = cls.entryWidthMetres * 2.0;
+            Expect(JunctionForm.MinimumInscribedDiameterMetres(wider) > minimum,
+                "minimum ICD: doubling the entry width did not raise the smallest circle it can be built in", failures);
+
+            Line(builder, "minimum ICD", Fmt("{0:F2} m at the default class, centreline {1:F2} m at that diameter",
+                minimum, centrelineAtMinimum));
+        }
+
+
+        /// <summary> A three-leg roundabout that resolves, built fresh on every call so each refusal below can break
+        /// exactly one thing and nothing else. Three legs 120 degrees apart on a 40 m circle, entries deflected to a 60 m
+        /// fastest path, 20 m splitter islands, and legs within 0.2 m of a 100 m plane over 30 m of approach -- a
+        /// 0.67 % gradient change against the class's 4 % limit. </summary>
+        private static JunctionRequest ValidRoundaboutRequest()
+        {
+            JunctionRequest request = new JunctionRequest();
+            request.form = JunctionTypeEnum.Roundabout;
+            request.roundabout = RoundaboutClass.Default();
+            request.legBearingsDeg = new List<double> { 0.0, 120.0, 240.0 };
+            request.legElevationsMetres = new List<double> { 100.0, 100.2, 99.8 };
+            request.legApproachLengthsMetres = new List<double> { 30.0, 30.0, 30.0 };
+            request.entryFastestPathRadiusMetres = 60.0;
+            request.splitterIslandLengthMetres = 20.0;
+            return request;
+        }
+
+
+        /// <summary> One refusal, checked the four ways a refusal has to hold up: it declines, it says why, the sentence
+        /// carries a figure the author can act on, and it never prints an infinity -- every division that could produce
+        /// one is refused by its own fault first, so a formatted infinity would mean a guard was skipped. </summary>
+        private static void ExpectRefused(JunctionRequest request, string what, List<string> failures)
+        {
+            JunctionPlan plan = JunctionForm.Resolve(request);
+            Expect(!plan.resolved && plan.flagged, Fmt("refusal: {0} was accepted", what), failures);
+            Expect(!string.IsNullOrEmpty(plan.message), Fmt("refusal: {0} was refused without saying why", what),
+                failures);
+            Expect(QuotesAFigure(plan.message),
+                Fmt("refusal: {0} was refused without quoting a figure -- \"{1}\"", what, plan.message), failures);
+            Expect(plan.message == null || plan.message.IndexOf("Infinity", StringComparison.Ordinal) < 0,
+                Fmt("refusal: {0} formatted an infinity into its message -- \"{1}\"", what, plan.message), failures);
+        }
+
+
+        /// <summary> Whether a refusal names a number. One that does not is a verdict rather than a report, and leaves an
+        /// author guessing which of the figures they typed was the wrong one. </summary>
+        private static bool QuotesAFigure(string message)
+        {
+            if (string.IsNullOrEmpty(message)) { return false; }
+            for (int i = 0; i < message.Length; i++)
+            {
+                if (message[i] >= '0' && message[i] <= '9') { return true; }
+            }
+            return false;
+        }
+
+
+        /// <summary> Case 16. Every way a roundabout can fail has to be REFUSED BY NAME with the figure that caused it,
+        /// because a silent fallback is the one outcome an author cannot debug. The six are taken one at a time from a
+        /// request that resolves, so in each the broken thing is the only thing wrong: too few legs to circulate between,
+        /// a circle below the derived minimum, two legs closer than the class allows, an entry too straight to slow
+        /// anyone, a splitter island too short to shelter a crossing, and a leg that cannot reach the circulatory plane
+        /// inside its approach-gradient limit.
+        ///
+        /// A refusal also has to keep filling the geometry in rather than blanking it: an author told the circle is too
+        /// small still needs to see the circulatory width the class implies, which is half of what tells them whether to
+        /// widen the circle or narrow the ring. </summary>
+        private static void CaseTheRoundaboutRefusesEachWayItCanFailAndQuotesTheFigure(StringBuilder builder,
+            List<string> failures)
+        {
+            JunctionPlan good = JunctionForm.Resolve(ValidRoundaboutRequest());
+            Expect(good.resolved && !good.flagged,
+                Fmt("roundabout: a valid three-leg roundabout was refused -- {0}", good.message), failures);
+            Expect(good.control == JunctionControl.EntryYield,
+                "roundabout: a resolved roundabout did not carry entry-yield control", failures);
+            Expect(good.circulatoryWidthMetres > 0.0 && good.centralIslandDiameterMetres > 0.0,
+                "roundabout: a resolved roundabout reported no circulatory way and no island", failures);
+            Expect(Math.Abs(good.worstLegSeparationDeg - 120.0) < 1e-9,
+                Fmt("roundabout: three legs 120 deg apart reported a worst separation of {0:R} deg",
+                    good.worstLegSeparationDeg), failures);
+            Expect(Math.Abs(good.circulatoryPlaneElevationMetres - 100.0) < 1e-9,
+                Fmt("roundabout: legs at 100, 100.2 and 99.8 m resolved to a {0:R} m plane rather than 100 m",
+                    good.circulatoryPlaneElevationMetres), failures);
+
+            JunctionRequest twoLegs = ValidRoundaboutRequest();
+            twoLegs.legBearingsDeg = new List<double> { 0.0, 180.0 };
+            ExpectRefused(twoLegs, "a roundabout with two legs", failures);
+
+            JunctionRequest tooSmall = ValidRoundaboutRequest();
+            tooSmall.roundabout.inscribedCircleDiameterMetres = 20.0;
+            ExpectRefused(tooSmall, "a 20 m circle, under the derived minimum", failures);
+
+            JunctionRequest tooClose = ValidRoundaboutRequest();
+            tooClose.legBearingsDeg = new List<double> { 0.0, 20.0, 200.0 };
+            ExpectRefused(tooClose, "two legs 20 deg apart", failures);
+
+            JunctionRequest tooStraight = ValidRoundaboutRequest();
+            tooStraight.entryFastestPathRadiusMetres = 150.0;
+            ExpectRefused(tooStraight, "an entry with a 150 m fastest path", failures);
+
+            JunctionRequest shortIsland = ValidRoundaboutRequest();
+            shortIsland.splitterIslandLengthMetres = 5.0;
+            ExpectRefused(shortIsland, "a 5 m splitter island", failures);
+
+            JunctionRequest steep = ValidRoundaboutRequest();
+            steep.legElevationsMetres = new List<double> { 100.0, 103.0, 100.0 };
+            ExpectRefused(steep, "a leg 2 m above the plane over 30 m of approach", failures);
+
+            JunctionPlan refusedSize = JunctionForm.Resolve(tooSmall);
+            Expect(refusedSize.circulatoryWidthMetres > 0.0,
+                "roundabout: the too-small refusal blanked the circulatory width instead of reporting it", failures);
+
+            Line(builder, "roundabout", "resolves at three legs, and refuses six ways by name with the figure");
+        }
+
+
+        /// <summary> An interchange that resolves, built fresh on every call. A dual-carriageway highway (rank 100, 5 %
+        /// gradient limit) crosses an urban four-lane (rank 60, 8 %), 250 m along a 500 m road with 200 m of approach
+        /// either side, a 30 m deck and a ramp radius just above the physical minimum for its design speed. Rank is the
+        /// class's cited design speed, which already orders the classes by how major they are. </summary>
+        private static JunctionRequest ValidInterchangeRequest()
+        {
+            GradeSeparationClass sep = GradeSeparationClass.Default();
+            InterchangeRampClass rampCls = InterchangeRampClass.Default();
+            SuperelevationClass superCls = SuperelevationClass.Default();
+
+            JunctionRequest request = new JunctionRequest();
+            request.form = JunctionTypeEnum.GradeSeparatedInterchange;
+            request.separation = sep;
+            request.ramp = rampCls;
+            request.superelevation = superCls;
+            request.classRankA = 100;
+            request.classRankB = 60;
+            request.identifierA = 1;
+            request.identifierB = 0;
+            request.maxGradientFractionA = 0.05;
+            request.maxGradientFractionB = 0.08;
+            request.availableApproachLengthMetres = 200.0;
+            request.crossingStationMetres = 250.0;
+            request.raisedRoadLengthMetres = 500.0;
+            request.spanLengthMetres = 30.0;
+            request.roadAngleBetweenDegrees = 90.0;
+            request.rampAlignment = RampAlignmentKind.Direct;
+            request.rampRequestedRadiusMetres = InterchangeRamp.MinimumRadiusMetres(rampCls, superCls) + 5.0;
+            request.rampPlanDistanceMetres = GradeSeparation.RequiredApproachLengthMetres(
+                sep.verticalClearanceMetres, request.maxGradientFractionB);
+            return request;
+        }
+
+
+        /// <summary> Case 17. An interchange is the flyover case, and the four things it has to get right are all
+        /// borrowed rather than reinvented: which road rises, whether it can rise far enough inside the approach it has,
+        /// where its deck is marked, and whether one ramp between the two can be driven.
+        ///
+        /// The MINOR road rises. That is the rule the operator holds and the case asserts from both slots, because a rule
+        /// that only works when the major road happens to be first is not a rule. Rank is the cited design speed, so the
+        /// 60 km/h four-lane goes over the 100 km/h highway and not the other way about.
+        ///
+        /// The deck is NOT generated here: what resolves is the span to mark, an author prefab sits on it, and the case
+        /// asserts the span is centred on the crossing, is exactly as long as asked, and stays inside the road. </summary>
+        private static void CaseTheInterchangeSeparatesRaisesTheMinorRoadAndMarksASpan(StringBuilder builder,
+            List<string> failures)
+        {
+            JunctionRequest request = ValidInterchangeRequest();
+            double clearance = GradeSeparationClass.Default().verticalClearanceMetres;
+            double required = clearance / 0.08;
+            double minRadius = InterchangeRamp.MinimumRadiusMetres(InterchangeRampClass.Default(),
+                SuperelevationClass.Default());
+
+            JunctionPlan plan = JunctionForm.Resolve(request);
+            Expect(plan.resolved && !plan.flagged,
+                Fmt("interchange: a valid crossing was refused -- {0}", plan.message), failures);
+            Expect(plan.control == JunctionControl.Uncontrolled,
+                "interchange: a resolved interchange did not report itself uncontrolled", failures);
+            Expect(!plan.raisedRoadIsA,
+                "interchange: the 100 km/h highway was raised over the 60 km/h four-lane instead of the reverse",
+                failures);
+            Expect(Math.Abs(plan.raiseHeightMetres - clearance) < 1e-9,
+                Fmt("interchange: the raise is {0:R} m and the clearance asked for is {1:R} m", plan.raiseHeightMetres,
+                    clearance), failures);
+            Expect(Math.Abs(plan.requiredApproachLengthMetres - required) < 1e-6,
+                Fmt("interchange: {0:R} m of approach was required to lift {1:R} m at 8 %, not {2:R} m",
+                    plan.requiredApproachLengthMetres, clearance, required), failures);
+            Expect(Math.Abs((plan.bridgeSpanEndMetres - plan.bridgeSpanStartMetres) - 30.0) < 1e-9
+                   && Math.Abs(plan.bridgeSpanStartMetres - 235.0) < 1e-9,
+                Fmt("interchange: a 30 m deck at station 250 m was marked from {0:R} to {1:R} m",
+                    plan.bridgeSpanStartMetres, plan.bridgeSpanEndMetres), failures);
+            Expect(plan.bridgeSpanStartMetres >= 0.0 && plan.bridgeSpanEndMetres <= 500.0,
+                "interchange: the deck span left the road it is marked on", failures);
+            Expect(plan.rampRadiusMetres + 1e-9 >= minRadius && plan.rampLengthMetres > 0.0,
+                Fmt("interchange: the ramp resolved at radius {0:R} m against a {1:R} m minimum, length {2:R} m",
+                    plan.rampRadiusMetres, minRadius, plan.rampLengthMetres), failures);
+            Expect(plan.rampGradientFraction > 0.0 && plan.rampGradientFraction <= 0.08 + 1e-9,
+                Fmt("interchange: the ramp gradient came out at {0:R}, outside the 8 % the raised road allows",
+                    plan.rampGradientFraction), failures);
+
+            CheckTheInterchangeRaisesTheMinorRoadFromEitherSlot(failures);
+            CheckTheInterchangeRefusals(minRadius, failures);
+            Line(builder, "interchange", Fmt("minor road rises {0:F2} m over {1:F1} m of approach, deck {2:F0}-{3:F0} m",
+                plan.raiseHeightMetres, plan.requiredApproachLengthMetres, plan.bridgeSpanStartMetres,
+                plan.bridgeSpanEndMetres));
+        }
+
+
+        /// <summary> The same crossing with the two roads swapped between the slots. The minor road has to rise either
+        /// way, so the verdict must flip and nothing else about it may change: a rule that depends on which road the
+        /// author happened to draw first is not a rule an author can rely on. </summary>
+        private static void CheckTheInterchangeRaisesTheMinorRoadFromEitherSlot(List<string> failures)
+        {
+            JunctionRequest swapped = ValidInterchangeRequest();
+            swapped.classRankA = 60;
+            swapped.classRankB = 100;
+            swapped.maxGradientFractionA = 0.08;
+            swapped.maxGradientFractionB = 0.05;
+
+            JunctionPlan plan = JunctionForm.Resolve(swapped);
+            Expect(plan.resolved && !plan.flagged,
+                Fmt("interchange: the swapped crossing was refused -- {0}", plan.message), failures);
+            Expect(plan.raisedRoadIsA,
+                "interchange: swapping the two roads did not swap which of them rises, so rank is not what decides it",
+                failures);
+        }
+
+
+        /// <summary> The four ways an interchange declines. The last is the one that matters most and is invisible from
+        /// the outside: a raised road whose class permits no gradient at all is refused as its OWN fault, before the
+        /// required-approach division can return an infinity. Without that guard the author would be shown an infinite
+        /// length instead of the flat road that caused it, which is why ExpectRefused also insists no message ever
+        /// carries the word. </summary>
+        private static void CheckTheInterchangeRefusals(double minRadius, List<string> failures)
+        {
+            JunctionRequest shortApproach = ValidInterchangeRequest();
+            shortApproach.availableApproachLengthMetres = 40.0;
+            ExpectRefused(shortApproach, "40 m of approach where 63.75 m is needed", failures);
+
+            JunctionRequest noSpan = ValidInterchangeRequest();
+            noSpan.spanLengthMetres = 0.0;
+            ExpectRefused(noSpan, "a deck with no length", failures);
+
+            JunctionRequest tightRamp = ValidInterchangeRequest();
+            tightRamp.rampRequestedRadiusMetres = minRadius - 5.0;
+            ExpectRefused(tightRamp, "a ramp radius below the design-speed minimum", failures);
+
+            JunctionRequest flatRoad = ValidInterchangeRequest();
+            flatRoad.maxGradientFractionB = 0.0;
+            ExpectRefused(flatRoad, "a raised road whose class permits no gradient", failures);
+        }
+
+
         /// <summary> Case 13. Constraint C-06: the same inputs give the same geometry every time. Every entry point that
         /// returns a shape is called twice on identical inputs and compared bit for bit -- corners, the plate fit, the
         /// sight triangles and the assembled bay. A junction that solved differently on the second call would rebuild
@@ -814,7 +1183,31 @@ namespace RoadCityMaster
                 Fmt("determinism: the turn bay changed between calls (start {0:R} then {1:R})", bayA.Start, bayB.Start),
                 failures);
 
-            Line(builder, "determinism", "corners, plate fit, sight triangles and turn bay identical on repeat calls");
+            // B-16. The two forms that derive geometry are held to the same rule. A junction that solved differently on
+            // the second call would re-mark its deck span, and so move an author's bridge prefab, on every reimport.
+            JunctionPlan roundA = JunctionForm.Resolve(ValidRoundaboutRequest());
+            JunctionPlan roundB = JunctionForm.Resolve(ValidRoundaboutRequest());
+            Expect(roundA.resolved == roundB.resolved
+                   && roundA.circulatoryWidthMetres == roundB.circulatoryWidthMetres
+                   && roundA.centralIslandDiameterMetres == roundB.centralIslandDiameterMetres
+                   && roundA.circulatoryPlaneElevationMetres == roundB.circulatoryPlaneElevationMetres
+                   && roundA.worstLegSeparationDeg == roundB.worstLegSeparationDeg,
+                Fmt("determinism: the roundabout changed between calls (island {0:R} then {1:R})",
+                    roundA.centralIslandDiameterMetres, roundB.centralIslandDiameterMetres), failures);
+
+            JunctionPlan overA = JunctionForm.Resolve(ValidInterchangeRequest());
+            JunctionPlan overB = JunctionForm.Resolve(ValidInterchangeRequest());
+            Expect(overA.raisedRoadIsA == overB.raisedRoadIsA
+                   && overA.raiseHeightMetres == overB.raiseHeightMetres
+                   && overA.bridgeSpanStartMetres == overB.bridgeSpanStartMetres
+                   && overA.bridgeSpanEndMetres == overB.bridgeSpanEndMetres
+                   && overA.rampLengthMetres == overB.rampLengthMetres
+                   && overA.rampRadiusMetres == overB.rampRadiusMetres,
+                Fmt("determinism: the interchange changed between calls (deck start {0:R} then {1:R})",
+                    overA.bridgeSpanStartMetres, overB.bridgeSpanStartMetres), failures);
+
+            Line(builder, "determinism",
+                "corners, plate fit, sight triangles, turn bay and both derived junction forms identical on repeat calls");
         }
 
         // ---- helpers ----

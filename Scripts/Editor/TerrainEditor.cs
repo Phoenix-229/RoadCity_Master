@@ -30,9 +30,11 @@ namespace RoadCityMaster
         private string[] roadsString = null;
         private Texture refreshButtonText = null;
         private GUIStyle imageButton = null;
-        private Texture2D loadButtonBG = null;
-        private Texture2D loadButtonBGGlow = null;
-        private GUIStyle loadButton = null;
+        // B-11. Gone from here: 'loadButton' and the two textures behind it. It was the fourth hand-built copy of the
+        // branded command style and the only DEAD one -- nothing in this file ever drew a button with it, and both its
+        // rest and hover backgrounds were the same `FlexBG.png`, so it had no hover to draw either. The live style is
+        // `LegacyInspectorShell.CommandButtonStyle()`; this file has no branded command to point at it, so the three
+        // fields, the two loads and the builder are simply gone rather than repointed.
         SplatImageResoMatchingEnum splatReso = SplatImageResoMatchingEnum.None;
         #endregion
 
@@ -126,6 +128,20 @@ namespace RoadCityMaster
             }
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(6f);
+
+            // B-14. Every splat control below reads `terrain.terrain.terrainData` -- the three resolution-matching
+            // options do it during a repaint, and the generate button does it inside MakeSplatMap. RoadTerrain fills
+            // that field from a Terrain on its own GameObject, so it is null exactly when this component was added to
+            // something that is not a terrain. Drawing the controls anyway means a NullReferenceException per repaint
+            // from a popup the author only opened to look at, so the section says what is wrong instead of drawing.
+            if (terrain.terrain == null)
+            {
+                EditorGUILayout.HelpBox("This component is not on a terrain, so there is nothing to make a splat map"
+                    + " of. Move it onto a GameObject that has a Terrain component, or assign one to its \"terrain\""
+                    + " field.", MessageType.Warning);
+                RoadCityMaster.EditorUtilities.DrawLine();
+                return;
+            }
 
             //Splat Resolution input:
             splatImageWidth.intValue = terrain.splatResoWidth;
@@ -230,8 +246,24 @@ namespace RoadCityMaster
             if (terrain.isSplatSingleRoad)
             {
                 LoadSplatSingleChoice();
-                splatSingleChoiceIndex.intValue = EditorGUILayout.Popup(terrain.splatSingleChoiceIndex, roadsString, GUILayout.Width(150f));
-                roadSingleChoiceUID.stringValue = roads[splatSingleChoiceIndex.intValue];
+                // B-14. This read `roads[splatSingleChoiceIndex.intValue]` with no bounds check on an array built from
+                // whatever roads are in the scene right now. With no roads it is empty and [0] throws; after a road is
+                // deleted the stored index outlives the entry it named and throws just the same -- an
+                // IndexOutOfRangeException on every repaint of an inspector the author merely has open, from a toggle
+                // they ticked to make a choice. Say there is nothing to choose from, and clamp a stale index to a road
+                // that does exist so the toggle keeps working instead of stalling the whole inspector.
+                if (roadsString.Length == 0)
+                {
+                    EditorGUILayout.LabelField("No roads in the scene to choose from.");
+                    roadSingleChoiceUID.stringValue = "";
+                }
+                else
+                {
+                    int choice = Mathf.Clamp(terrain.splatSingleChoiceIndex, 0, roadsString.Length - 1);
+                    choice = EditorGUILayout.Popup(choice, roadsString, GUILayout.Width(150f));
+                    splatSingleChoiceIndex.intValue = choice;
+                    roadSingleChoiceUID.stringValue = roads[choice];
+                }
             }
 
             EditorGUILayout.EndHorizontal();
@@ -262,8 +294,6 @@ namespace RoadCityMaster
             string basePath = RoadEditorUtility.GetBasePath();
 
             RoadCityMaster.EditorUtilities.LoadTexture(ref refreshButtonText, basePath + "/Editor/Icons/refresh2.png");
-            RoadCityMaster.EditorUtilities.LoadTexture(ref loadButtonBG, basePath + "/Editor/Icons/FlexBG.png");
-            RoadCityMaster.EditorUtilities.LoadTexture(ref loadButtonBGGlow, basePath + "/Editor/Icons/FlexBG.png");
 
             if (imageButton == null)
             {
@@ -273,19 +303,6 @@ namespace RoadCityMaster
                 imageButton.fixedHeight = 16f;
                 imageButton.padding = new RectOffset(0, 0, 0, 0);
                 imageButton.normal.background = null;
-            }
-
-            if (loadButton == null)
-            {
-                loadButton = new GUIStyle(GUI.skin.button);
-                loadButton.contentOffset = new Vector2(0f, 1f);
-                loadButton.normal.textColor = new Color(1f, 1f, 1f, 1f);
-                loadButton.normal.background = loadButtonBG;
-                loadButton.active.background = loadButtonBGGlow;
-                loadButton.focused.background = loadButtonBGGlow;
-                loadButton.hover.background = loadButtonBGGlow;
-                loadButton.fixedHeight = 16f;
-                loadButton.padding = new RectOffset(0, 0, 0, 0);
             }
         }
 
@@ -308,27 +325,49 @@ namespace RoadCityMaster
         }
 
 
+        /// <summary> B-14. The one button in this inspector that does real work, and it was the one that said nothing
+        /// about any of it. Three outcomes were indistinguishable from each other and from a dropped click: a file
+        /// written, the save panel dismissed, and nothing produced because there was no road to trace. So each is said
+        /// once, in the console, naming the file where there is one. No progress bar: EditorUtility.DisplayProgressBar
+        /// is modal, and BuildProgressReporter records it as the freeze the author complained about -- for a call that
+        /// blocks either way, the report that helps is its outcome, not a bar drawn during it. </summary>
         private void GenerateSplatMap()
         {
-            byte[] bytes = null;
+            byte[] bytes;
+            string scope;
             if (terrain.isSplatSingleRoad && terrain.roadSingleChoiceUID != "")
             {
                 bytes = RoadUtility.MakeSplatMap(terrain.terrain, terrain.splatBackground, terrain.splatForeground, terrain.splatResoWidth, terrain.splatResoHeight, terrain.splatWidth, terrain.isSplatSkipBridges, terrain.isSplatSkipTunnels, terrain.roadSingleChoiceUID);
+                scope = "the chosen road";
             }
             else
             {
                 bytes = RoadUtility.MakeSplatMap(terrain.terrain, terrain.splatBackground, terrain.splatForeground, terrain.splatResoWidth, terrain.splatResoHeight, terrain.splatWidth, terrain.isSplatSkipBridges, terrain.isSplatSkipTunnels);
+                scope = "every road in the scene";
             }
 
-            if (bytes != null && bytes.Length > 3)
+            if (bytes == null || bytes.Length < 4)
             {
-                string path = UnityEditor.EditorUtility.SaveFilePanel("Save splat map", Application.dataPath, "Splat", "png");
-                if (path != null && path.Length > 3)
-                {
-                    System.IO.File.WriteAllBytes(path, bytes);
-                }
-                bytes = null;
+                // MakeSplatMap returns null for exactly one reason the author can act on: it found no built road to
+                // trace. Either the chosen road has been deleted since it was chosen, or no road in the scene has been
+                // built yet -- a road with no spline has no centre line to paint.
+                Debug.LogWarning("Road & City Master: no splat map was made for \"" + terrain.transform.name + "\","
+                    + " because there was no built road to trace for " + scope + ". Build the roads first; a splat map"
+                    + " of the background colour alone carries nothing.");
+                return;
             }
+
+            string path = UnityEditor.EditorUtility.SaveFilePanel("Save splat map", Application.dataPath, "Splat", "png");
+            if (string.IsNullOrEmpty(path))
+            {
+                Debug.Log("Road & City Master: the splat map for \"" + terrain.transform.name + "\" was made but not"
+                    + " saved, because the save panel was dismissed.");
+                return;
+            }
+
+            System.IO.File.WriteAllBytes(path, bytes);
+            Debug.Log("Road & City Master: wrote a " + terrain.splatResoWidth + " x " + terrain.splatResoHeight
+                + " splat map of " + scope + " on \"" + terrain.transform.name + "\" to " + path);
         }
     }
 }

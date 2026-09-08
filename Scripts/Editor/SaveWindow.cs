@@ -96,18 +96,7 @@ namespace RoadCityMaster
                 EditorGUILayout.LabelField("File exists already!", EditorStyles.miniLabel);
             }
 
-            if (windowType == WindowTypeEnum.Edge)
-            {
-                EditorGUILayout.LabelField(Path.Combine(path, "EOM" + fileName + ".rao"), EditorStyles.miniLabel);
-            }
-            else if (windowType == WindowTypeEnum.Extrusion)
-            {
-                EditorGUILayout.LabelField(Path.Combine(path, "ESO" + fileName + ".rao"), EditorStyles.miniLabel);
-            }
-            else
-            {
-                EditorGUILayout.LabelField(Path.Combine(Path.Combine(path, "Groups"), fileName + ".rao"), EditorStyles.miniLabel);
-            }
+            EditorGUILayout.LabelField(TargetFilePath(), EditorStyles.miniLabel);
 
             GUILayout.Space(4f);
 
@@ -144,7 +133,13 @@ namespace RoadCityMaster
                 tSMMs[0].thumbString = thumbString;
                 tSMMs[0].desc = desc;
                 tSMMs[0].displayName = displayName;
+                // B-14. Read before the save, because the window closes on the next line and the path it was showing
+                // goes with it. A save writes a file outside the project the author is looking at and changes nothing on
+                // screen, so without this the only difference between a save and a dropped click is that the window
+                // shut -- which Cancel does too.
+                string target = TargetFilePath();
                 tSMMs[0].SaveToLibrary(fileName, false);
+                Debug.Log("Road & City Master: saved the extrusion \"" + displayName + "\" to " + target);
                 Close();
             }
         }
@@ -159,7 +154,9 @@ namespace RoadCityMaster
                 tEOMs[0].thumbString = thumbString;
                 tEOMs[0].desc = desc;
                 tEOMs[0].displayName = displayName;
+                string target = TargetFilePath();
                 tEOMs[0].SaveToLibrary(fileName, false);
+                Debug.Log("Road & City Master: saved the edge object \"" + displayName + "\" to " + target);
                 Close();
             }
         }
@@ -178,7 +175,11 @@ namespace RoadCityMaster
                 WO.isBridge = isBridge;
                 WO.isDefault = false;
 
+                string target = TargetFilePath();
                 RoadUtility.SaveNodeObjects(ref tSMMs, ref tEOMs, ref WO);
+                Debug.Log("Road & City Master: saved the group \"" + displayName + "\" -- "
+                    + (tSMMs == null ? 0 : tSMMs.Length) + " extrusion(s) and "
+                    + (tEOMs == null ? 0 : tEOMs.Length) + " edge object(s) -- to " + target);
                 Close();
             }
         }
@@ -193,41 +194,37 @@ namespace RoadCityMaster
         }
 
 
-        private void CheckFileExistence()
+        /// <summary> The file this window will write when Save is pressed, for the window type it was opened as.
+        ///
+        /// B-14. The same three-branch path arithmetic was written out twice, once for the label that tells the author
+        /// which file they are about to write and once inside <see cref="CheckFileExistence"/>, and the two copies did
+        /// not agree: the label named &lt;library&gt;/Groups/&lt;name&gt;.rao while the existence check looked in
+        /// &lt;library&gt;/B/&lt;name&gt;.rao -- a folder nothing writes to. So "File exists already!" could not appear
+        /// for a group however many groups were already saved, and pressing Save quietly replaced one.
+        /// RoadUtility.SaveNodeObjects writes Groups, so the label was the correct copy and this is it; the wrong copy
+        /// is gone rather than corrected in place, because two copies is how they came to disagree. The save reports
+        /// name this too, so there is now one statement of where a preset goes and three readers of it. </summary>
+        private string TargetFilePath()
         {
+            if (path.Length < 5)
+            {
+                path = RootUtils.GetDirLibrary();
+            }
             if (windowType == WindowTypeEnum.Edge)
             {
-                if (File.Exists(Path.Combine(path, "EOM" + fileName + ".rao")))
-                {
-                    isFileExisting = true;
-                }
-                else
-                {
-                    isFileExisting = false;
-                }
+                return Path.Combine(path, "EOM" + fileName + ".rao");
             }
-            else if (windowType == WindowTypeEnum.Extrusion)
+            if (windowType == WindowTypeEnum.Extrusion)
             {
-                if (File.Exists(Path.Combine(path, "ESO" + fileName + ".rao")))
-                {
-                    isFileExisting = true;
-                }
-                else
-                {
-                    isFileExisting = false;
-                }
+                return Path.Combine(path, "ESO" + fileName + ".rao");
             }
-            else
-            {
-                if (File.Exists(Path.Combine(Path.Combine(path, "B"), fileName + ".rao")))
-                {
-                    isFileExisting = true;
-                }
-                else
-                {
-                    isFileExisting = false;
-                }
-            }
+            return Path.Combine(Path.Combine(path, "Groups"), fileName + ".rao");
+        }
+
+
+        private void CheckFileExistence()
+        {
+            isFileExisting = File.Exists(TargetFilePath());
         }
 
 

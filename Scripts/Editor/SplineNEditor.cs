@@ -41,9 +41,7 @@ namespace RoadCityMaster
         private Texture helpButtonTexture = null;
         private Texture refreshButtonTexture = null;
         private Texture defaultButtonTexture = null;
-        private Texture2D loadButtonBG = null;
         private Texture2D textAreaBG = null;
-        private Texture2D loadButtonBGGlow = null;
         private Texture2D manualBG = null;
         #endregion
 
@@ -80,7 +78,9 @@ namespace RoadCityMaster
         //RoadCityMaster.Splination.RepeatUVTypeEnum repeatUVType = RoadCityMaster.Splination.RepeatUVTypeEnum.None;
         private EdgeObjects.EdgeObjectMaker EOM = null;
         private GUIStyle imageButton = null;
-        private GUIStyle loadButton = null;
+        // B-11. Gone from here: 'loadButton' and the two textures it was built from. The branded command-button style is
+        // `LegacyInspectorShell.CommandButtonStyle()`, which is where three other editors' copies of it went too.
+        // `loadButtonTexture` above is a different thing -- an icon drawn INSIDE buttons -- and stays.
         private GUIStyle manualButton = null;
         private GUIStyle guiButton = null;
 
@@ -92,6 +92,11 @@ namespace RoadCityMaster
         // Bridge
         private bool isBridgeStart = false;
         private bool isBridgeEnd = false;
+        // Tunnel. B-18: the state was in SplineN and the operations were in SplineN, and this file did not contain the
+        // word "tunnel" once -- so neither portal could be authored. Held the same way the bridge pair is, because the
+        // two are the same control with a different verb.
+        private bool isTunnelStart = false;
+        private bool isTunnelEnd = false;
         private bool isRoadCut = false;
 
         private bool isSingleTemp;
@@ -248,8 +253,6 @@ namespace RoadCityMaster
             EditorUtilities.LoadTexture(ref refreshButtonTexture, basePath + "/Editor/Icons/refresh.png");
             EditorUtilities.LoadTexture(ref defaultButtonTexture, basePath + "/Editor/Icons/refresh2.png");
             EditorUtilities.LoadTexture(ref textAreaBG, basePath + "/Editor/Icons/popupbg.png");
-            EditorUtilities.LoadTexture(ref loadButtonBG, basePath + "/Editor/Icons/loadbg.png");
-            EditorUtilities.LoadTexture(ref loadButtonBGGlow, basePath + "/Editor/Icons/loadbgglow.png");
             EditorUtilities.LoadTexture(ref manualBG, basePath + "/Editor/Icons/manualbg.png");
 
             if (imageButton == null)
@@ -260,20 +263,6 @@ namespace RoadCityMaster
                 imageButton.fixedHeight = 16f;
                 imageButton.padding = new RectOffset(0, 0, 0, 0);
                 imageButton.normal.background = null;
-            }
-
-            if (loadButton == null)
-            {
-                loadButton = new GUIStyle(GUI.skin.button);
-                loadButton.contentOffset = new Vector2(0f, 1f);
-                loadButton.normal.textColor = new Color(1f, 1f, 1f, 1f);
-                loadButton.normal.background = loadButtonBG;
-                loadButton.active.background = loadButtonBGGlow;
-                loadButton.focused.background = loadButtonBGGlow;
-                loadButton.hover.background = loadButtonBGGlow;
-                loadButton.fixedHeight = 16f;
-                loadButton.fixedWidth = 128f;
-                loadButton.padding = new RectOffset(0, 35, 0, 0);
             }
 
             if (manualButton == null)
@@ -361,6 +350,91 @@ namespace RoadCityMaster
             #endregion
 
 
+            #region "Option: Elevation above the ground"
+            // B-13's third requirement, in the author's words: "if you want an elevation you edit it in the node
+            // inspector in the height or elevation to pull the ground up, so as not to float." So the figure here is a
+            // height ABOVE THE GROUND UNDER THE NODE, not a world Y. World Y = 0 is wherever the scene origin happens
+            // to sit -- the frame-of-reference mistake RM-94 removed from RoadNodeGround -- whereas an embankment 4 m
+            // high is 4 m above the ground whatever that ground's own height is.
+            //
+            // It is DERIVED, never stored. A node's height lives in exactly one place, its transform, which
+            // SplineC.Setup copies into `pos` on every build; a serialised second copy of the same quantity would be a
+            // second source of truth to keep in step. So the field shows transform.y - groundY on the way out and
+            // writes groundY + typed on the way in, and there is nothing new to keep in step.
+            //
+            // Intersection and special end nodes are left out for the reason the drop handler skips a snapped drop:
+            // their position is exactly another node's, and that exact coincidence IS the junction or the road
+            // connection. Raising one side of it would take the junction apart.
+            if (!node.isIntersection && !node.isSpecialEndNode)
+            {
+                // B-17. This road's own ground where it has been recorded, the live surface otherwise. Read from the
+                // live surface alone, the figure below collapsed towards zero the moment the road was built -- the
+                // ground under a built road is the embankment the road raised, so a node 4 m up on its own embankment
+                // read as 4 cm up, and typing 4 m again raised it another 4 m. The road records the ground it found
+                // before it built; measured from that, the figure means the same thing before and after a build.
+                float groundY = node.spline != null && node.spline.road != null
+                    ? node.spline.road.NodeGroundY(node.transform.position)
+                    : RoadNodeGround.SurfaceYUnder(node.transform.position);
+                if (float.IsNegativeInfinity(groundY))
+                {
+                    // Creation and dragging both refuse a node with no terrain under it, so reaching this means the
+                    // terrain was removed or resized after the node was placed. There is no ground to measure against,
+                    // and inventing one is the bug RM-94 removed.
+                    EditorGUILayout.LabelField("No terrain under this node, so it has no height above the ground.");
+                }
+                else
+                {
+                    float elevation = node.transform.position.y - groundY;
+                    if (fields.FloatField("Elevation above ground: ", "nodeelevation", ref elevation,
+                        "Metres this node sits above the ground under it. The road stays on the node and the terraform"
+                        + " brings the ground up to meet it, which is what an embankment is. 0 sets the node on the"
+                        + " surface; a negative figure sets it into the surface, and the ground is cut down to it."))
+                    {
+                        Undo.RecordObject(node.transform, "Set node elevation");
+                        Vector3 raised = node.transform.position;
+                        raised.y = groundY + elevation;
+                        node.transform.position = raised;
+                        // Deliberately NOT put through RoadNodeGround.Lift. Lift is there to catch a node buried by a
+                        // mouse ray or a drag, where the depth was never asked for; a figure the author typed is an
+                        // instruction. Clamping it at the surface would make a cutting impossible to author, which is
+                        // the write B-17 governs.
+                        if (node.IsLegitimate() && node.spline.road.isMaxGradeEnabled)
+                        {
+                            node.EnsureGradeValidity();
+                        }
+                        node.pos = node.transform.position;
+                        TriggerRoadUpdate();
+                    }
+
+                    // B-17. What stops this node going lower, said beside the field that asks it to. The maximum grade
+                    // clamp is correct road engineering -- a node cannot drop faster than the road can climb back out
+                    // of it -- but it was silent, so a figure the author typed came back changed with no reason given
+                    // and the tool looked broken. Stateless on purpose: it is recomputed from the node's neighbours
+                    // every repaint, so it is true before the author types as well as after, and there is no remembered
+                    // message to go stale or to flicker. Nothing here writes anything.
+                    float lowestY, highestY;
+                    string limitedBy;
+                    if (node.GradeWindow(out lowestY, out highestY, out limitedBy))
+                    {
+                        if (!float.IsNegativeInfinity(lowestY))
+                        {
+                            EditorGUILayout.LabelField("Lowest allowed here",
+                                (lowestY - groundY).ToString("0.##") + " m, at the "
+                                + (node.spline.road.maxGrade * 100f).ToString("0.##") + " % maximum grade to "
+                                + (string.IsNullOrEmpty(limitedBy) ? "the next node" : limitedBy));
+                        }
+                        if (!float.IsPositiveInfinity(highestY))
+                        {
+                            EditorGUILayout.LabelField("Highest allowed here",
+                                (highestY - groundY).ToString("0.##") + " m, at the same maximum grade");
+                        }
+                    }
+                }
+                EditorUtilities.DrawLine();
+            }
+            #endregion
+
+
             #region "Option: Manual road cut"
             if (node.idOnSpline > 0 && node.idOnSpline < (node.spline.GetNodeCount() - 1) && !node.isIntersection && !node.isSpecialEndNode)
             {
@@ -393,6 +467,123 @@ namespace RoadCityMaster
                 }
 
                 if (isBridgeDisplayed)
+                {
+                    RoadCityMaster.EditorUtilities.DrawLine();
+                }
+            }
+            #endregion
+
+
+            #region "Option: Tunnel options"
+            // B-18. The two toggles the whole tunnel chain was waiting for. Everything behind them already existed --
+            // the state and the matcher in SplineN, the span in SplineC, the mesh in RoadCreationT, the raised ground in
+            // TerraformingThreaded's RM-98 branch -- and none of it could be reached, because this file did not draw a
+            // tunnel control at all.
+            //
+            // Refusals are SHOWN, not implied by an absent control, with one exception that is deliberate: "no tunnel
+            // has been started before this node" is the resting state of nearly every node on nearly every road, so
+            // printing it everywhere would be noise rather than a report. It is shown once the author is actually
+            // tunnelling on this road -- see AnyTunnelStartOnSpline.
+            bool isTunnelDisplayed = false;
+            if (!node.isEndPoint)
+            {
+                string tunnelRefusal;
+
+                //Tunnel start:
+                if (!node.isTunnelEnd)
+                {
+                    if (node.CanTunnelStart(out tunnelRefusal))
+                    {
+                        isTunnelStart = EditorGUILayout.Toggle(" Tunnel start", node.isTunnelStart);
+                        isTunnelDisplayed = true;
+                    }
+                    else if (!string.IsNullOrEmpty(tunnelRefusal))
+                    {
+                        EditorGUILayout.HelpBox("Tunnel start: " + tunnelRefusal, MessageType.Info);
+                        isTunnelDisplayed = true;
+                    }
+                }
+
+                //Tunnel end:
+                if (!node.isTunnelStart)
+                {
+                    if (node.CanTunnelEnd(out tunnelRefusal))
+                    {
+                        isTunnelEnd = EditorGUILayout.Toggle(" Tunnel end", node.isTunnelEnd);
+                        isTunnelDisplayed = true;
+                    }
+                    else if (!string.IsNullOrEmpty(tunnelRefusal)
+                        && (node.isTunnelEnd || AnyTunnelStartOnSpline(node.spline)))
+                    {
+                        EditorGUILayout.HelpBox("Tunnel end: " + tunnelRefusal, MessageType.Info);
+                        isTunnelDisplayed = true;
+                    }
+                }
+
+                if (node.isTunnelStart && node.isTunnelMatched && node.tunnelCounterpartNode != null)
+                {
+                    EditorGUILayout.LabelField("Tunnel exits at",
+                        "node " + node.tunnelCounterpartNode.idOnSpline);
+                    isTunnelDisplayed = true;
+                }
+
+                // B-18. What the run passes under, authored on the START node only, because a tunnel is one run and a
+                // run has one water level. These commit as they are edited rather than through the apply block below:
+                // they change no matching, raise no span and re-run no setup, so routing them through the toggle path
+                // would only make them look like they did.
+                if (node.isTunnelStart)
+                {
+                    bool wasUnderWater = !float.IsNegativeInfinity(node.tunnelWaterSurfaceY);
+                    bool isUnderWater = EditorGUILayout.Toggle(
+                        new GUIContent(" Passes under water",
+                            "Switch on for a tunnel under a river, a lake or the sea. The level is STATED here because"
+                            + " the terrain provider carries no water query -- the tool cannot ask the host what is"
+                            + " above the bore, so an author has to say."), wasUnderWater);
+                    isTunnelDisplayed = true;
+
+                    if (isUnderWater != wasUnderWater)
+                    {
+                        Undo.RecordObject(node, "Set tunnel water");
+                        node.tunnelWaterSurfaceY = isUnderWater
+                            ? node.transform.position.y
+                            : float.NegativeInfinity;
+                        if (!isUnderWater) { node.isTunnelImmersedTube = false; }
+                        EditorUtility.SetDirty(node);
+                    }
+
+                    if (isUnderWater)
+                    {
+                        float waterY = float.IsNegativeInfinity(node.tunnelWaterSurfaceY)
+                            ? node.transform.position.y
+                            : node.tunnelWaterSurfaceY;
+                        if (fields.FloatField("  Water surface height: ", "tunnelwatery", ref waterY,
+                            "World height in metres of the water surface over this run. The bore has to keep the"
+                            + " required cover between its crown and the bed under that water, or the tunnel is"
+                            + " refused with the shortfall."))
+                        {
+                            Undo.RecordObject(node, "Set tunnel water height");
+                            node.tunnelWaterSurfaceY = waterY;
+                            EditorUtility.SetDirty(node);
+                        }
+
+                        bool isTube = EditorGUILayout.Toggle(
+                            new GUIContent("  Immersed tube",
+                                "On: the tube is sunk into a dredged trench in the bed and the bed is put back over"
+                                + " it. Off: the bore passes beneath the bed and the bed is not touched at all. Which"
+                                + " one is built is an engineering decision, so it is stated and never inferred."),
+                            node.isTunnelImmersedTube);
+                        if (isTube != node.isTunnelImmersedTube)
+                        {
+                            Undo.RecordObject(node, "Set immersed tube");
+                            node.isTunnelImmersedTube = isTube;
+                            EditorUtility.SetDirty(node);
+                        }
+                    }
+
+                    DrawTunnelPlan(node);
+                }
+
+                if (isTunnelDisplayed)
                 {
                     RoadCityMaster.EditorUtilities.DrawLine();
                 }
@@ -521,6 +712,39 @@ namespace RoadCityMaster
                 }
                 #endregion
 
+
+                #region "Option: Tunnel options"
+                // B-18. Applied exactly as the bridge pair is: set the field, then call the operation that matches the
+                // pair up. The guard is asked again here and not trusted from the draw pass, because the draw pass ran
+                // against the node as it was before this frame's other commits.
+                //Tunnel start:
+                if (!node.isEndPoint)
+                {
+                    if (!node.isTunnelEnd && node.CanTunnelStart())
+                    {
+                        if (isTunnelStart != node.isTunnelStart)
+                        {
+                            node.isTunnelStart = isTunnelStart;
+                            node.TunnelToggleStart();
+                            ReportTunnelSpan(node);
+                        }
+                    }
+                }
+                //Tunnel end:
+                if (!node.isEndPoint)
+                {
+                    if (!node.isTunnelStart && node.CanTunnelEnd())
+                    {
+                        if (isTunnelEnd != node.isTunnelEnd)
+                        {
+                            node.isTunnelEnd = isTunnelEnd;
+                            node.TunnelToggleEnd();
+                            ReportTunnelSpan(node);
+                        }
+                    }
+                }
+                #endregion
+
                 if (node.CanSplinate())
                 {
                     UpdateSplineObjects();
@@ -530,6 +754,92 @@ namespace RoadCityMaster
                 EditorUtility.SetDirty(target);
             }
         }
+
+
+        #region "Tunnels"
+        /// <summary> B-18. Whether this spline has any unfinished tunnel on it.
+        ///
+        /// The one refusal that is suppressed until it is relevant. "No tunnel has been started before this node" is the
+        /// truth at nearly every node on nearly every road, and a HelpBox saying so on all of them would train an author
+        /// to stop reading them -- which costs more than the message gains. Once there IS a start waiting for its exit,
+        /// the same sentence is the most useful thing on the panel. </summary>
+        private static bool AnyTunnelStartOnSpline(SplineC spline)
+        {
+            if (spline == null || spline.nodes == null) { return false; }
+            for (int index = 0; index < spline.nodes.Count; index++)
+            {
+                SplineN candidate = spline.nodes[index];
+                if (candidate != null && candidate.isTunnelStart) { return true; }
+            }
+            return false;
+        }
+
+
+        /// <summary> B-18. What this tunnel will do to the ground, shown before the author commits to it.
+        ///
+        /// The planner is asked every repaint on purpose. It reads the spline, the road and the terrain surface and
+        /// writes nothing -- no height, no hold, no announcement -- so the cost is a handful of terrain samples and the
+        /// gain is that the refusal an author would otherwise meet only after clicking is on screen while they are still
+        /// deciding. The sentence itself is the linker's, not a second wording of it. </summary>
+        private static void DrawTunnelPlan(SplineN node)
+        {
+            City.TunnelAuthoringLink.TunnelAuthoringOutcome outcome = City.TunnelAuthoringLink.PlanFor(node);
+            if (!outcome.planned)
+            {
+                if (!string.IsNullOrEmpty(outcome.refusal))
+                {
+                    EditorGUILayout.HelpBox("Tunnel: " + outcome.refusal, MessageType.Info);
+                }
+                return;
+            }
+
+            if (!outcome.plan.viable)
+            {
+                EditorGUILayout.HelpBox(outcome.refusal, MessageType.Warning);
+                return;
+            }
+
+            EditorGUILayout.HelpBox(outcome.Describe(), MessageType.Info);
+            if (outcome.mode == City.TunnelMode.Standalone)
+            {
+                EditorGUILayout.HelpBox("No terrain provider is connected, so the bore is lined and left visible and"
+                    + " the hill is not opened. Connect a provider to have the ground cut.", MessageType.Info);
+            }
+        }
+
+
+        /// <summary> B-18. The one place a toggled tunnel becomes a terrain write.
+        ///
+        /// Called after <c>TunnelToggleStart</c>/<c>TunnelToggleEnd</c> have settled the pair, because a run cannot be
+        /// measured until it has both portals. A toggle that broke the pair leaves nothing to raise and gives the hole
+        /// back instead -- which is the case an author hits every time they switch a tunnel off, so it is the one that
+        /// must not warn. The work itself is queued on <see cref="City.BuildDispatch"/> and appears in Background Tasks
+        /// under B-14; nothing about the terrain happens inside this click. </summary>
+        private static void ReportTunnelSpan(SplineN node)
+        {
+            if (node == null) { return; }
+
+            SplineN owner = node.isTunnelStart
+                ? node
+                : (node.isTunnelEnd && node.tunnelCounterpartNode != null ? node.tunnelCounterpartNode : null);
+
+            if (owner == null || !owner.isTunnelMatched)
+            {
+                node.ReleaseTunnelOpening();
+                if (node.tunnelCounterpartNode != null) { node.tunnelCounterpartNode.ReleaseTunnelOpening(); }
+                return;
+            }
+
+            City.TunnelAuthoringLink.TunnelAuthoringOutcome raised = City.TunnelAuthoringLink.Raise(owner);
+            if (!raised.queued && raised.planned)
+            {
+                // Only a measured-then-refused run reaches the console. A run that could not be read yet -- the road is
+                // mid-rebuild -- is already on the panel, and saying it twice is how a log stops being read.
+                Debug.LogWarning("Road & City Master: " + City.TunnelAuthoringLink.RequesterIdFor(owner) + " -- "
+                    + (string.IsNullOrEmpty(raised.refusal) ? "the tunnel could not be planned" : raised.refusal));
+            }
+        }
+        #endregion
 
 
         private void OnSelectionChanged()
@@ -545,18 +855,21 @@ namespace RoadCityMaster
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("");
 
-            if (GUILayout.Button("Save group", EditorStyles.miniButton, GUILayout.Width(108f)) || GUILayout.Button(saveButtonTexture, imageButton, GUILayout.Width(16f)))
+            // B-14. This was one `if` with `||` between two GUILayout.Button calls. `||` short-circuits, so on the frame
+            // the author clicked "Save group" the icon button beside it was never drawn -- the Layout pass had counted
+            // two controls in this row and the click pass emitted one, which is the mismatch IMGUI answers with
+            // "Getting control 1's position in a group with only 1 controls" on the following repaint. Both presses are
+            // read into locals first, so both buttons are drawn on every pass whatever either one returns.
+            bool isSavingGroup = GUILayout.Button("Save group", EditorStyles.miniButton, GUILayout.Width(108f));
+            bool isSavingGroupIcon = GUILayout.Button(saveButtonTexture, imageButton, GUILayout.Width(16f));
+            if (isSavingGroup || isSavingGroupIcon)
             {
                 SaveWindow saveWindow = EditorWindow.GetWindow<SaveWindow>();
-                if (node.isBridge)
-                // Todo: needs to be updated, currently only saves groups as bridges?!
-                {
-                    saveWindow.Initialize(ref sceneRect, SaveWindow.WindowTypeEnum.BridgeWizard, node);
-                }
-                else
-                {
-                    saveWindow.Initialize(ref sceneRect, SaveWindow.WindowTypeEnum.BridgeWizard, node);
-                }
+                // The two branches that stood here were identical -- both opened the window as a BridgeWizard -- under
+                // a Todo asking whether a group should always save as a bridge. Collapsed to the one thing they both
+                // did, so the code no longer implies a distinction it does not make; the question the Todo asks is
+                // about what SaveNodeObjects should write, not about this call, and is not settled by writing it twice.
+                saveWindow.Initialize(ref sceneRect, SaveWindow.WindowTypeEnum.BridgeWizard, node);
             }
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4f);
@@ -564,7 +877,13 @@ namespace RoadCityMaster
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("");
-            if (GUILayout.Button("Open Wizard", loadButton, GUILayout.Width(128f)))
+            // B-11. This drew with a private style built from `loadbg`/`loadbgglow` and a 35 px right padding that shoved
+            // the label off centre; it now asks the shell for the same branded style `Update road` and
+            // `Update intersection` use. The appearance therefore CHANGED here, deliberately: opening the wizard is a
+            // command, and the tool had three different-looking brands for one kind of act. The explicit 128 px width is
+            // gone with it, so the shell's `CommandButtonWidth` is what decides -- an option here would have overridden
+            // the style's own `fixedWidth` and put this button back out of line with every other command.
+            if (GUILayout.Button("Open Wizard", LegacyInspectorShell.CommandButtonStyle()))
             {
                 // || GUILayout.Button(btnLoadText,GSDImageButton,GUILayout.Width(16f))){
                 Wizard wizard = EditorWindow.GetWindow<Wizard>();
@@ -593,9 +912,13 @@ namespace RoadCityMaster
             isEdgeObjectHelp = EditorGUILayout.Foldout(isEdgeObjectHelp, "Quick help");
             if (isEdgeObjectHelp)
             {
+                // B-14. Every picture in this legend was drawn with GUILayout.Button and its result thrown away: seven
+                // controls that highlight under the cursor and depress when clicked, and answer with nothing. A legend
+                // explains the buttons elsewhere in this inspector, it is not one of them, so it is drawn with Label.
+                // The style is unchanged, so each glyph still looks exactly like the button it stands for.
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(extrudeButtonTexture, imageButton, GUILayout.Width(32f));
+                GUILayout.Label(extrudeButtonTexture, imageButton, GUILayout.Width(32f));
                 EditorGUILayout.LabelField("= Extrusion objects", EditorStyles.miniLabel);
                 EditorGUILayout.LabelField("");
                 EditorGUILayout.EndHorizontal();
@@ -604,7 +927,7 @@ namespace RoadCityMaster
 
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(edgeButtonTexture, imageButton, GUILayout.Width(32f));
+                GUILayout.Label(edgeButtonTexture, imageButton, GUILayout.Width(32f));
                 EditorGUILayout.LabelField("= Edge objects", EditorStyles.miniLabel);
                 EditorGUILayout.LabelField("");
                 EditorGUILayout.EndHorizontal();
@@ -613,35 +936,35 @@ namespace RoadCityMaster
 
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(saveButtonTexture, imageButton, GUILayout.Width(16f));
+                GUILayout.Label(saveButtonTexture, imageButton, GUILayout.Width(16f));
                 EditorGUILayout.LabelField("= Saves object config to library for use on other nodes.", EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(copyButtonTexture, imageButton, GUILayout.Width(16f));
+                GUILayout.Label(copyButtonTexture, imageButton, GUILayout.Width(16f));
                 EditorGUILayout.LabelField("= Duplicates object onto current node.", EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(deleteButtonTexture, imageButton, GUILayout.Width(16f));
+                GUILayout.Label(deleteButtonTexture, imageButton, GUILayout.Width(16f));
                 EditorGUILayout.LabelField("= Deletes object.", EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f));
+                GUILayout.Label(refreshButtonTexture, imageButton, GUILayout.Width(16f));
                 EditorGUILayout.LabelField("= Refreshes object.", EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Button(defaultButtonTexture, imageButton, GUILayout.Width(16f));
+                GUILayout.Label(defaultButtonTexture, imageButton, GUILayout.Width(16f));
                 EditorGUILayout.LabelField("= Resets setting(s) to default.", EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
                 EditorGUILayout.EndVertical();
@@ -752,7 +1075,10 @@ namespace RoadCityMaster
 
                 SMM.isToggled = EditorGUILayout.Foldout(SMM.isToggled, "#" + currentCount.ToString() + ": " + SMM.objectName);
 
-                GUILayout.Button(extrudeButtonTexture, imageButton, GUILayout.Width(32f));
+                // B-14. A row marker saying "this row is an extrusion", not a command: it was a Button with its press
+                // discarded, sitting immediately left of four buttons that do act, so the one picture in the row that
+                // answers a click with nothing looked exactly like the four that do not.
+                GUILayout.Label(extrudeButtonTexture, imageButton, GUILayout.Width(32f));
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     SMM.Setup();
@@ -1361,7 +1687,8 @@ namespace RoadCityMaster
 
                 EOM.isToggled = EditorGUILayout.Foldout(EOM.isToggled, "#" + currentCount.ToString() + ": " + EOM.objectName);
 
-                GUILayout.Button(edgeButtonTexture, imageButton, GUILayout.Width(32f));
+                // B-14. The edge-object row's marker, same as the extrusion row's above: a picture, not a command.
+                GUILayout.Label(edgeButtonTexture, imageButton, GUILayout.Width(32f));
                 if (GUILayout.Button(refreshButtonTexture, imageButton, GUILayout.Width(16f)))
                 {
                     EOM.Setup();
@@ -2162,6 +2489,10 @@ namespace RoadCityMaster
                 IReadOnlyList<SplineN> nodeObjects = SplineN.ActiveNodes;
                 Vector3 droppedPosition = node.transform.position;
                 const float proximitySqr = 2f * 2f;
+                // B-13. Whether the drop was absorbed by a snap onto another node. A snap makes this node's position
+                // exactly equal to another node's, and that exact coincidence IS the connection or the intersection --
+                // so the ground checks below must leave it alone. The node it snapped to is already on the ground.
+                bool isSnappedToNode = false;
                 for (int ni = 0; ni < nodeObjects.Count; ni++)
                 {
                     SplineN xNode = nodeObjects[ni];
@@ -2180,6 +2511,7 @@ namespace RoadCityMaster
                         {
                             //End point connection.
                             node.transform.position = xNode.transform.position;
+                            isSnappedToNode = true;
                             //Activate special end node for tnode
                             TriggerRoadConnection(node, xNode);
                             break;
@@ -2205,6 +2537,7 @@ namespace RoadCityMaster
                             }
                         }
                         node.transform.position = xNode.transform.position;
+                        isSnappedToNode = true;
                         TriggerIntersection(node, xNode);
                         break;
                     }
@@ -2217,12 +2550,50 @@ namespace RoadCityMaster
                 //Enforce maximum road grade:
                 if (VectorDiff(node.transform.position, node.pos))
                 {
-                    node.pos = node.transform.position;
-                    if (node.IsLegitimate() && node.spline.road.isMaxGradeEnabled)
+                    // B-13. Creation lifts a node clear of the ground under it; DRAGGING did not, so the move tool
+                    // could push the same node under the surface and leave it there -- buried, which is half of what
+                    // this entry is about. Lift only ever raises, so a node the author deliberately elevated stays
+                    // where they put it: an authored elevation is a request to raise the GROUND to it, not something
+                    // to be pulled back down.
+                    //
+                    // And a node dragged off the terrain altogether is REFUSED rather than lifted, because there is
+                    // nothing there to lift it clear of and every later pass would sample a surface that is not there.
+                    // `node.pos` still holds where it was before the drag, so putting it back is exact.
+                    //
+                    // B-17. Through the ROAD's lift, not the plain one, where there is a road. The plain lift measures
+                    // from the live surface, and on a road that has already been built the live surface under it is the
+                    // carriageway the road itself raised -- so dragging a node down moved it straight back up to the
+                    // road, every rebuild raised the floor again, and the node genuinely could not be lowered. The road
+                    // keeps the ground it found before it built; measured from that, a drag downwards is a drag
+                    // downwards.
+                    bool isAccepted = true;
+                    if (!isSnappedToNode)
                     {
-                        node.EnsureGradeValidity();
+                        if (RoadNodeGround.IsOverTerrain(node.transform.position))
+                        {
+                            Road ownerRoad = node.spline != null ? node.spline.road : null;
+                            node.transform.position = ownerRoad != null
+                                ? ownerRoad.LiftNode(node.transform.position, 0f)
+                                : RoadNodeGround.Lift(node.transform.position);
+                        }
+                        else
+                        {
+                            Debug.LogWarning(RoadNodeGround.NoTerrainMessage(node.transform.position)
+                                + " The node was returned to where it was before the drag.");
+                            node.transform.position = node.pos;
+                            isAccepted = false;
+                        }
                     }
-                    TriggerRoadUpdate();
+
+                    if (isAccepted)
+                    {
+                        node.pos = node.transform.position;
+                        if (node.IsLegitimate() && node.spline.road.isMaxGradeEnabled)
+                        {
+                            node.EnsureGradeValidity();
+                        }
+                        TriggerRoadUpdate();
+                    }
                 }
             }
 

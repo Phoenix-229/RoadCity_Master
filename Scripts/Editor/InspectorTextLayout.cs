@@ -54,11 +54,12 @@ namespace RoadCityMaster
     /// than the exception: `GUI.skin` is per-pass state that Unity sets at the top of each `OnGUI` and can differ
     /// between windows, so a restore on a later tick would have written this tool's captured value onto whichever skin
     /// happened to be current then -- possibly a skin this tool never touched. The mutation also turned out to serve
-    /// no caller. `GUILayout.Label` with no style argument is the only control that reads `GUI.skin.label`, and of the
-    /// six files that call `Apply` the only unstyled ones are seven short section captions in `RoadEditor` --
-    /// `"Materials:"`, `"Physics materials defaults:"` and the like, none of which can wrap. The two long
-    /// `GUILayout.Label` texts in the tool, `RoadEditor.cs:440` and `RoadSystemEditor.cs:105`, already pass an
-    /// explicit style. So the skin handling was removed rather than repaired: nothing here writes to `GUI.skin`, and
+    /// no caller. `GUILayout.Label` with no style argument is the only control that reads `GUI.skin.label`, and not one
+    /// of the six files that call `Apply` contains such a call -- their captions and their long paragraphs alike are
+    /// `EditorGUILayout.LabelField`, which reads `EditorStyles.label`, which is precisely what this file wraps. The
+    /// unstyled `GUILayout.Label` calls that do exist in the tool are the City scene-view panels' readouts
+    /// (`AlignmentHandles.DrawPanel`, `SuitabilityOverlay`), which draw inside their own `Handles.BeginGUI` area and
+    /// call nothing here. So the skin handling was removed rather than repaired: nothing here writes to `GUI.skin`, and
     /// <see cref="InspectorStyleOwnershipGate"/> case 5 asserts that it never starts again. A `GUILayout.Label` added
     /// later that does need wrapping passes `EditorStyles.wordWrappedLabel`, as the City scene tools already do.
     /// Everything this file still sets -- the two `EditorStyles` flags and `EditorGUIUtility.labelWidth` -- is legal to
@@ -204,11 +205,58 @@ namespace RoadCityMaster
 
             // 120px is a usable colour swatch, object field or slider; below that the row stops being editable, which
             // is a worse fault than a wrapped label.
-            float room = view - 120f;
+            //
+            // B-5 grew this reservation by the unit column. A registry field now draws its unit in its own column to the
+            // right of the value instead of inside the label, so the width a row needs for its control is no longer
+            // 120px but 120px plus that column. Left at 120 the label column would be widened into space the unit token
+            // has already taken, and the control -- not the annotation -- is what gets squeezed out of a horizontal
+            // group. Reserved for every row, not only registry rows: one label column serves the whole inspector, and a
+            // column that changed width depending on which kind of field came next would be worse than a wide one.
+            float room = view - (120f + UnitColumnWidth());
             if (room < 100f) { return; }
 
             float wanted = measured < room ? measured : room;
             if (wanted > EditorGUIUtility.labelWidth) { EditorGUIUtility.labelWidth = wanted; }
+        }
+        #endregion
+
+
+        #region "The unit column (B-5)"
+        /// <summary> The widest unit token the unit column ever has to hold. Every token comes from
+        /// <see cref="FieldDescriptor.UnitLabel"/>, and `fraction` is the longest of them -- spelled out rather than
+        /// abbreviated to `frac` because an inspector row has no legend an author can consult.
+        ///
+        /// Public for the same reason <see cref="WidestLabel"/> is: a longer unit added later has to fail a gate rather
+        /// than quietly clip its own column. </summary>
+        public const string WidestUnit = "fraction";
+
+        /// <summary> Width used when there is nothing to measure with: no editor skin at all, or a call from outside a
+        /// draw pass. AUTHORED (C-15): it is `fraction` at the editor's default label font plus padding, which is the
+        /// same figure the measurement returns on this machine -- so a fallback row is laid out like a measured one
+        /// rather than visibly differently, and a headless caller gets a real number instead of a zero-width column.
+        /// </summary>
+        public const float UnitColumnFallbackWidth = 56f;
+
+        /// <summary> Measured once per domain load, like <see cref="measured"/> and for the same reason. </summary>
+        private static float measuredUnit;
+
+        /// <summary> The width of the inspector's unit column: one figure shared by every row.
+        ///
+        /// Measured from <see cref="WidestUnit"/> rather than given as a pixel number, which is this file's existing
+        /// doctrine (a hardcoded width is right on one display and wrong on the next) -- but measured ONCE and handed to
+        /// every row, because a column whose width followed the token on each row would put `m`, `km/h` and `fraction`
+        /// at three different distances from their values and stop reading as a column at all.
+        ///
+        /// The two bails are the ones <see cref="WidenLabelColumn"/> documents: `CalcSize` needs the font and GUI
+        /// machinery a draw pass sets up, so off-pass or without a skin it throws rather than answering. Neither result
+        /// is cached, so the first real repaint still measures. </summary>
+        public static float UnitColumnWidth()
+        {
+            if (measuredUnit > 0f) { return measuredUnit; }
+            if (!SkinIsAvailable()) { return UnitColumnFallbackWidth; }
+            if (EditorGUIUtility.currentViewWidth <= 1f) { return UnitColumnFallbackWidth; }
+            measuredUnit = EditorStyles.miniLabel.CalcSize(new GUIContent(WidestUnit)).x + 6f;
+            return measuredUnit;
         }
         #endregion
     }

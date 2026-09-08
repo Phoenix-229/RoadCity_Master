@@ -28,7 +28,7 @@ otherwise.
 
 **Where a message goes.** Per-object refusals appear on the object; the aggregate appears in RM-52's status panel. Never
 both, never neither. This is `RefusalRouting.Decide`, a total function, so the promise is a property of the code rather
-than something to remember while writing the fourteenth inspector.
+than something to remember while writing the next inspector.
 
 **How a computed value is shown.** Measured lengths, solved radii, instance counts, RM-61's inscribed dimensions: drawn
 disabled, under the one group `Measured`, never in an editable field. `MeasuredValuePresentation` holds both the group

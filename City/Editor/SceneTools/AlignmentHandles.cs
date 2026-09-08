@@ -109,8 +109,18 @@ namespace RoadCityMaster.City.Editor
 
         // RM-108 removed an "Alignment" submenu of four rows: show, hide and their two validators. Same reasoning as the
         // suitability overlay beside it -- OnSceneGui returns immediately while `plan` is null, and no menu row can set
-        // a plan, so the rows could only ever turn on a tool that drew nothing. The RoadSystem inspector hosts them now,
-        // and only once Plan is non-null. Show(), Hide() and IsShown are unchanged.
+        // a plan, so the rows could only ever turn on a tool that drew nothing.
+        //
+        // B-22 is the correction to the sentence that stood here. It read "the RoadSystem inspector hosts them now",
+        // and that inspector did not: RM-108 deleted the rows and wrote the replacement as a fact rather than making
+        // it one, so between that task and this one Show() and Hide() had no caller anywhere in the tool and the
+        // ribbon could not be turned on at all. The RoadSystem inspector now draws an "Alignment" section with one
+        // show/hide toggle over IsShown, and LastSuggestion beside it, and it draws that section only while Plan is
+        // non-null -- for the reason above, not out of caution.
+        //
+        // What is still missing, and is B-28 rather than this file's: nothing calls SetPlan or SetCorridor, so Plan
+        // stays null and that section stays closed. The bake produces both a raster and a solved alignment; no code
+        // hands either to these scene tools. Show(), Hide() and IsShown are unchanged by either task.
 
         /// <summary> One scene repaint: the curvature ribbon along the fitted line, a draggable handle on each authored
         /// corner, then the legend panel on top. The panel comes last for the same reason it does in the overlay -- it

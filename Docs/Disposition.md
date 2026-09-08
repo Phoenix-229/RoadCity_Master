@@ -48,6 +48,15 @@ would delete precisely those.
 That is deliberate: it proves the list describes the tree as it is, and that no file was deleted ahead of the change
 that removes it and the compile and suite run that follow.
 
+Once a removal **has** been carried out, the Disposition cell says so — `**remove** (performed, B-21)` — and the same
+check runs the other way round. A performed removal of a type or an asset must leave no file behind; a performed
+removal of a field or a method must leave the file, because deleting a member is not licence to delete the file holding
+it, and must leave no **live** line naming the member. Live is the operative word: the comment that explains a removal
+names what was removed, and by the first of the four searches above that is a comment and not a reference, so the check
+reads the file through the same comment stripper the inspector gate uses rather than a second one that could disagree
+with it. Only a `remove` may claim to have been carried out; a keep or a wire-up that does is a contradiction, and
+`RCMDEAD` case 6 is where it is caught.
+
 ## The list
 
 <!-- disposition-table:begin — generated from DispositionRegister. Do not edit by hand. -->
@@ -69,6 +78,15 @@ that removes it and the compile and suite run that follow.
 | `Materials/Concrete2Diffuse.mat` | asset | no reference -- no `.cs` file names the material | no reference -- GUID `a09bfe33f517abd47820653eeb108e28` has zero hits in any `.prefab` or `.unity` under `Assets/` | no reference -- no `.rao` library names it; the sidewalk and road entries name `Road1.mat` and `RoadDetailOverlay1.mat` | no reference -- no FBX in the tree contains the literal `Concrete2Diffuse`, so no FBX slot resolves it BY NAME -- the check RM-48 requires before any material may be called orphaned | **remove** | The one material that survives all four searches, and it survives the name check RM-48 added as well. `Concrete2.mat` exists beside it and is referenced; this is a leftover duplicate whose name reads like a texture. Removal is deferred to RM-67's shader inventory, which reads every material in the tree anyway and is the cheapest place to be certain. |
 <!-- disposition-table:end -->
 
-Three items are marked for removal, three for wiring up, and seven for keeping with a stated reason. The keeps
+One item is marked for removal, three for wiring up, and nine for keeping with a stated reason. The keeps
 outnumber the removals, which `RCMDEAD` also checks: in a tree where assets load by string path, a disposition list
 that is mostly deletions is evidence about the pass rather than about the tree.
+
+It began as three removals, and B-21 re-ran all four searches on each of them before deleting anything. Two did not
+survive that. `RoadCityMaster.RenderQueue` is a dead type in a **load-bearing file**: `RenderQueue.cs` is named as a
+string literal in the frozen vendor set that `RCMPROV` asserts is on disk, so deleting it would trade a licensing
+record for one unused file. `Materials/Concrete2Diffuse.mat` was deferred to RM-67's shader inventory, and RM-67 is what
+settled it: the material had been **ported**, and three registers now name it — a sanctioned identity, conversion recipe
+R6, and a concrete family counted as 12. Both are recorded here as keeps with the new evidence in their own cells rather
+than as a comment somewhere. The third, `RigidBody.minCollisionVelocity`, survived every search twice and was removed
+with the commented-out block that read it, as one group; `Scripts/RigidBody.cs` stays, because the type is live.
