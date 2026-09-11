@@ -200,26 +200,6 @@ namespace RoadCityMaster.City
         public Material sleeperMaterial = null;
         public Material railMaterial = null;
         public Material crossingMaterial = null;
-
-        /// <summary> The mast shaft and foundation material. Empty = pink + named note. </summary>
-        public Material ohleMastMaterial;
-
-        /// <summary> The bracket and fittings material. Empty = pink + named note. </summary>
-        public Material ohleBracketMaterial;
-
-        /// <summary> The catenary and contact wire material. Empty = pink + named note. </summary>
-        public Material ohleWireMaterial;
-
-        /// <summary> Optional author-provided mast prefab. When non-null, this replaces the generated
-        /// mast mesh at every mast position. The prefab is instantiated, not the generated mesh.
-        /// The recommendation (§ procedural or prefabs) says procedural for the mast, but the author's
-        /// own prefab always wins where one is given (D-1's rule). </summary>
-        public GameObject ohleMastPrefab;
-
-        /// <summary> Optional author-provided catenary wire prefab. Rare — a wire that matches a specific
-        /// catenary shape for every span is hard to prefab — but the slot exists because blocking an
-        /// author from overriding is worse than offering a slot they leave empty. </summary>
-        public GameObject ohleWirePrefab;
     }
 
 
@@ -540,7 +520,6 @@ namespace RoadCityMaster.City
             RecordEarthworkRefusals(plan, form);
             FindCrossings(plan, roads, form);
             RecordStationStops(plan, settings);
-            CheckPerChunkCeiling(plan, settings, form);
             return plan;
         }
 
@@ -788,39 +767,6 @@ namespace RoadCityMaster.City
                 }
                 plan.stationStopCount++;
             }
-        }
-
-        // ------------------------------------------------------------------ per-chunk instance ceiling (D-15)
-
-        /// <summary> D-15. Sleepers are INSTANCED content -- one cached sleeper mesh laid at the class spacing along
-        /// every track -- so what can hurt a phone is how many fall in ONE streaming chunk, not the run's total. The
-        /// samples already walk the alignment at their own spacing, so each sample stands for that much track; the
-        /// busiest chunk's sample count, scaled by the sleeper-to-sample spacing ratio and the track count, is the
-        /// sleeper count that chunk carries. A run that packs more than the family's per-chunk ceiling
-        /// (<see cref="CityInstanceBudget"/>) into one cell -- a spiral folded into one chunk, a spacing authored near
-        /// zero -- is refused with its own number rather than shipped as a stutter. Counted once here at plan time over
-        /// the finite sample list, never per frame, so it adds no play-time cost. </summary>
-        private static void CheckPerChunkCeiling(RailAlignmentPlan plan, RailAlignmentSettings settings,
-            RailFormationClass form)
-        {
-            if (plan.samples.Count < 2) { return; }
-            float chunk = CityStreamingConfig.DefaultChunkSizeMetres;
-            double sampleSpacing = settings.sampleSpacingMetres > 0f ? settings.sampleSpacingMetres : 5.0;
-            double sleeperSpacing = form.sleeperSpacingMetres > 0f ? form.sleeperSpacingMetres : 0.6;
-
-            List<Vector3> samplePoints = new List<Vector3>(plan.samples.Count);
-            for (int i = 0; i < plan.samples.Count; i++) { samplePoints.Add(plan.samples[i].position); }
-            int busiestSamples = CityInstanceBudget.BusiestChunkCount(samplePoints, chunk);
-
-            // A sample stands for one spacing of track; a chunk's sleeper count is its samples times the sleepers each
-            // sample's length holds, times the number of parallel tracks laid across the same formation.
-            double sleepersPerSample = sampleSpacing / sleeperSpacing;
-            int tracks = plan.trackCount > 0 ? plan.trackCount : 1;
-            int busiestSleepers = (int)Math.Ceiling(busiestSamples * sleepersPerSample * tracks);
-
-            CityInstanceCeilingVerdict verdict = CityInstanceBudget.Check(
-                CityInstanceFamily.RailSleeper, busiestSleepers);
-            if (!verdict.withinCeiling) { plan.refusals.Add(verdict.message); }
         }
 
         /// <summary> A station, worded the one way the whole file words it. </summary>

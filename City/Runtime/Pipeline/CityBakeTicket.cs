@@ -191,7 +191,13 @@ namespace RoadCityMaster.City
             }
 
             if (graph == null) { return "city:none"; }
-            return "city:" + graph.GetEntityId().GetHashCode().ToString();
+            int h = 0;
+            string id = graph.GetEntityId().ToString();
+            if (id != null)
+            {
+                for (int i = 0; i < id.Length; i++) h = h * 31 + id[i];
+            }
+            return "city:" + h.ToString();
         }
 
         /// <summary> What Background Tasks calls it. The graph's name, because that is what the author sees in the

@@ -5589,20 +5589,20 @@ RCMSUITE END</code></pre>
 <p>The two anchor phrases the rule actually matches on are <code>authored for this project</code> and <code>Upstream file, MIT licensed</code>. They were chosen so that neither is a substring of the other, and so that neither collides with the two file names both headers happen to mention &mdash; otherwise every proprietary header, which names <code>LICENSE.md</code>, would read as a hit for the other licence.</p>
 <ol class="steps"><li>Open <b>Window&nbsp;&rsaquo; Road City Master&nbsp;&rsaquo; Licensing&nbsp;&rsaquo; Stamp per-file headers</b>.</li><li>Read the <code>RCMLICSTAMP</code> report in the console. It is one line of counts followed by one <code>REFUSED</code> line per file the operator would not touch.</li><li>Resolve every refused file by hand, then run it again.</li></ol>
 <pre data-lang="text"><code>RCMLICSTAMP WRITE
-  files 404  stamped 8  already 392  refused 4
+  files 404  stamped 5  already 395  refused 4
   REFUSED City\Editor\CityLicenceGate.cs</code></pre>
 <p>The transform is pure and idempotent: stamping a file that already carries the right header changes nothing, so running it twice does not produce two headers (<code>LicenceHeaderOperator.cs:49&ndash;73</code>). Passing <code>write:&nbsp;false</code> gives a dry run that reports what would change and writes nothing.</p>
 <div class="stop"><p>A file carrying <em>both</em> headers is refused and returned unchanged &mdash; never silently "fixed". That state means MIT code and proprietary code have been smeared into one file, and which way it should be resolved is a decision a person has to make. The stamper naming it and stopping is the correct outcome.</p></div>
 <h3 id="licence-census" data-title="The census: where the tree stands today"><span class="sect">19.3</span>The census: where the tree stands today</h3>
 <p>The table below is not a target and not a claim &mdash; it is the count of what is on disk in this copy of the tool, taken the same way the check takes it, by looking for the two anchor phrases in the text of every <code>.cs</code> file.</p>
 <div class="tablewrap"><table><thead><tr><th>State</th><th>Files</th><th>Means</th></tr></thead><tbody>
-<tr><td><code>Missing</code></td><td><span class="pill warn">8</span></td><td>No licence header at all. Resolves by path, not determinate.</td></tr>
-<tr><td><code>ProprietaryOnly</code></td><td><span class="pill ok">337</span></td><td>Declares itself new work authored for this project.</td></tr>
+<tr><td><code>Missing</code></td><td><span class="pill warn">5</span></td><td>No licence header at all. Resolves by path, not determinate.</td></tr>
+<tr><td><code>ProprietaryOnly</code></td><td><span class="pill ok">340</span></td><td>Declares itself new work authored for this project.</td></tr>
 <tr><td><code>MitModifiedOnly</code></td><td><span class="pill ok">55</span></td><td>Declares itself upstream MIT, modified or not.</td></tr>
 <tr><td><code>Conflicting</code></td><td><span class="pill stop">4</span></td><td>Carries both headers. Refused by the stamper.</td></tr>
 <tr><td><b>Total <code>.cs</code> in the tool</b></td><td><b>404</b></td><td>Every file the stamper walks.</td></tr>
 </tbody></table></div>
-<p>Read that honestly: <b>8</b> of <b>404</b> files carry no licence header yet. The rule, the stamper and the check that enforces them all exist and are proven by their own gates; what has not happened is the write across the tree. Until it does, every one of those files still resolves to a licence by path &mdash; the product is not ambiguous about what it contains &mdash; but the file itself does not say so, and a file that does not say so is the wrong thing to hand to a customer.</p>
+<p>Read that honestly: <b>5</b> of <b>404</b> files carry no licence header yet. The rule, the stamper and the check that enforces them all exist and are proven by their own gates; what has not happened is the write across the tree. Until it does, every one of those files still resolves to a licence by path &mdash; the product is not ambiguous about what it contains &mdash; but the file itself does not say so, and a file that does not say so is the wrong thing to hand to a customer.</p>
 <p>4 files carry both anchor phrases and will be refused:</p>
 <ul>
 <li><code>City\Editor\CityLicenceGate.cs</code></li>

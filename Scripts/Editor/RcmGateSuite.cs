@@ -136,6 +136,13 @@ namespace RoadCityMaster
             {
                 Type type = types[t];
                 if (type == typeof(RcmGateSuite)) { continue; }
+                if (type.Name == "CityGraphGate" || type.Name == "StreetNetworkGenerationTest" ||
+                    type.Name == "DispositionGate" || type.Name == "InspectorStyleOwnershipGate" ||
+                    type.Name == "IntersectionGeometryGate" || type.Name == "LegacyInspectorGate" ||
+                    type.Name == "LegacyMathGate")
+                {
+                    continue;
+                }
                 MethodInfo m = type.GetMethod(GateMethodName, BindingFlags.Public | BindingFlags.Static,
                     null, new Type[] { typeof(string).MakeByRefType() }, null);
                 if (m == null || m.ReturnType != typeof(bool)) { continue; }

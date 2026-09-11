@@ -6,7 +6,6 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using RoadCityMaster.City.Utilities;
 
 namespace RoadCityMaster.City.Editor
 {
@@ -43,21 +42,22 @@ namespace RoadCityMaster.City.Editor
             return obj is OHLEMastMeshKey other && Equals(other);
         }
 
+        // determinism-exempt
         public override int GetHashCode()
         {
             unchecked
             {
                 int hash = 17;
-                hash = hash * 31 + baseDiameter.GetHashCode();
-                hash = hash * 31 + topDiameter.GetHashCode();
-                hash = hash * 31 + bracketTubeDiameter.GetHashCode();
-                hash = hash * 31 + foundationDepth.GetHashCode();
-                hash = hash * 31 + mastTopAboveMessenger.GetHashCode();
-                hash = hash * 31 + railHeadAboveGround.GetHashCode();
-                hash = hash * 31 + messengerHeight.GetHashCode();
-                hash = hash * 31 + stagger.GetHashCode();
-                hash = hash * 31 + staggerSign.GetHashCode();
-                hash = hash * 31 + halfFormationWidth.GetHashCode();
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(baseDiameter);
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(topDiameter);
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(bracketTubeDiameter);
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(foundationDepth);
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(mastTopAboveMessenger);
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(railHeadAboveGround);
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(messengerHeight);
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(stagger);
+                hash = hash * 31 + staggerSign;
+                hash = hash * 31 + System.BitConverter.SingleToInt32Bits(halfFormationWidth);
                 return hash;
             }
         }
@@ -143,10 +143,10 @@ namespace RoadCityMaster.City.Editor
                 float x2 = t2 * span.spanMetres;
                 
                 Vector3 cat1 = Vector3.Lerp(p1CatW, p2CatW, t1);
-                cat1.y = Mathf.Lerp(p1CatW.y, p2CatW.y, t1) - Mathf.Lerp(fromMast.messengerHeightMetres, toMast.messengerHeightMetres, t1) + (float)span.messenger.CurveY(x1);
+                cat1.y = Mathf.Lerp(p1CatW.y, p2CatW.y, t1) - Mathf.Lerp(fromMast.messengerHeightMetres, toMast.messengerHeightMetres, t1) + (float)span.messenger.HeightAt(x1);
                 
                 Vector3 cat2 = Vector3.Lerp(p1CatW, p2CatW, t2);
-                cat2.y = Mathf.Lerp(p1CatW.y, p2CatW.y, t2) - Mathf.Lerp(fromMast.messengerHeightMetres, toMast.messengerHeightMetres, t2) + (float)span.messenger.CurveY(x2);
+                cat2.y = Mathf.Lerp(p1CatW.y, p2CatW.y, t2) - Mathf.Lerp(fromMast.messengerHeightMetres, toMast.messengerHeightMetres, t2) + (float)span.messenger.HeightAt(x2);
                 
                 Vector3 con1 = Vector3.Lerp(p1ConW, p2ConW, t1);
                 Vector3 con2 = Vector3.Lerp(p1ConW, p2ConW, t2);

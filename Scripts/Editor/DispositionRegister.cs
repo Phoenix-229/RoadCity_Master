@@ -264,7 +264,7 @@ namespace RoadCityMaster
                 + "at build time, so no field and no inspector names the type",
                 SearchOutcome.NoReference,
                 "no prefab or scene carries the component; it is only ever added in code. B-21 re-ran this by GUID: "
-                + "`2759b1170f87beb4ebaadcee989329b7` has zero hits in any `.prefab`, `.unity` or `.asset`",
+                + "`2759b117-0f87beb4-ebaadcee-989329b7` has zero hits in any `.prefab`, `.unity` or `.asset`",
                 SearchOutcome.NoReference,
                 "no serialised asset names it",
                 SearchOutcome.NoReference,

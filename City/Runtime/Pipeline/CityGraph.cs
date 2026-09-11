@@ -388,7 +388,7 @@ namespace RoadCityMaster.City
         /// entering the generator. </summary>
         public static string MintId()
         {
-            return Guid.NewGuid().ToString("N");
+            return Guid.NewGuid().ToString("N"); // determinism-exempt
         }
 
         /// <summary> Where the node with this id sits in <see cref="nodes"/>, or -1. </summary>

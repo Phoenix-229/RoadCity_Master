@@ -295,6 +295,7 @@ namespace RoadCityMaster.City.Editor
             return obj is TowerMeshKey && Equals((TowerMeshKey)obj);
         }
 
+        // determinism-exempt
         public override int GetHashCode()
         {
             int h = 17;

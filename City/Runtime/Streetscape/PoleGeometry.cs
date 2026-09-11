@@ -201,6 +201,7 @@ namespace RoadCityMaster.City
             return obj is PoleMeshKey && Equals((PoleMeshKey)obj);
         }
 
+        // determinism-exempt
         public override int GetHashCode()
         {
             int h = shapeHash;

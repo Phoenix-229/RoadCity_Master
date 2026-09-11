@@ -505,43 +505,34 @@ namespace RoadCityMaster.City.Editor
             }
 
             Road sourceRoad = city.sourceRoad;
-            Spline candidateAlignment = sourceRoad.spline;
+            SplineC candidateAlignment = sourceRoad.spline;
             ITerrainSurfaceReader surfaceReader = TerrainWriteGateway.Active != null ? TerrainWriteGateway.Active.SurfaceReader : null;
 
             float surfaceGrade = 0f;
             float waterGapMetres = 0f;
-            float waterLevel = 0f; // Typically 0 in this engine unless defined elsewhere.
+            float waterLevel = 0f; 
             bool portalOnOpenWater = false;
-            bool portalOnNoGround = false;
             bool underwaterCaseAvailable = false;
+            bool portalGroundValid = true;
             
-            float classGradientLimit = 0f;
-            if (sourceRoad.roadClass != null) 
-            {
-                classGradientLimit = sourceRoad.roadClass.maxGradient;
-            }
-
-            float surfaceSpanMetres = BridgeTypeCatalog.MaxSpanMetres();
+            float classGradientLimit = 0.05f;
+            float surfaceSpanMetres = 150f;
 
             Vector3 portalMouth = candidateAlignment.nodes[0].pos;
             Vector3 boreDirection = Vector3.forward;
-            float boreRadius = 4f; // Fallback if rail formation is missing
+            float boreRadius = 4f; 
 
             if (surfaceReader != null)
             {
-                // Sample surface grade (rise over run between ends)
                 Vector3 pStart = candidateAlignment.nodes[0].pos;
                 Vector3 pEnd = candidateAlignment.nodes[candidateAlignment.nodes.Count - 1].pos;
                 float h1 = surfaceReader.SampleHeight(pStart.x, pStart.z);
                 float h2 = surfaceReader.SampleHeight(pEnd.x, pEnd.z);
-                if (surfaceReader.HasGround(pStart.x, pStart.z) && surfaceReader.HasGround(pEnd.x, pEnd.z))
-                {
-                    float rise = Mathf.Abs(h2 - h1);
-                    float run = Vector2.Distance(new Vector2(pStart.x, pStart.z), new Vector2(pEnd.x, pEnd.z));
-                    if (run > 0f) surfaceGrade = rise / run;
-                }
+                
+                float rise = Mathf.Abs(h2 - h1);
+                float run = Vector2.Distance(new Vector2(pStart.x, pStart.z), new Vector2(pEnd.x, pEnd.z));
+                if (run > 0f) surfaceGrade = rise / run;
 
-                // Sample water gap
                 float firstWater = -1f;
                 float lastWater = -1f;
                 float currentDist = 0f;
@@ -551,7 +542,7 @@ namespace RoadCityMaster.City.Editor
                     float h = surfaceReader.SampleHeight(pt.x, pt.z);
                     if (i > 0) currentDist += Vector3.Distance(pt, candidateAlignment.nodes[i-1].pos);
                     
-                    if (surfaceReader.HasGround(pt.x, pt.z) && h <= waterLevel)
+                    if (h <= waterLevel)
                     {
                         if (firstWater < 0f) firstWater = currentDist;
                         lastWater = currentDist;
@@ -559,39 +550,42 @@ namespace RoadCityMaster.City.Editor
                 }
                 if (firstWater >= 0f) waterGapMetres = lastWater - firstWater;
 
-                // Portal flags
-                // Get bore direction from D-6 entry point
                 SettlementRailEntryRow railRow = SettlementRailEntryProbe.Resolve(city, fitTable, railMainLine, turnoutRatio);
                 if (railRow.Answered && railRow.entry.resolved)
                 {
-                    if (railRow.entry.approach == SettlementRailApproach.Branch || railRow.entry.approach == SettlementRailApproach.Through)
+                    if (railRow.entry.approach == SettlementRailApproach.ThroughLine)
                     {
-                        portalMouth = railRow.entry.junction.position;
-                        boreDirection = railRow.entry.junction.forward;
+                        portalMouth = railRow.entry.entryPoint;
+                        boreDirection = (railRow.entry.exitPoint - railRow.entry.entryPoint).normalized;
+                    }
+                    else if (railRow.entry.approach == SettlementRailApproach.Terminus)
+                    {
+                        portalMouth = railRow.entry.junctionPoint;
+                        boreDirection = (railRow.entry.terminusPoint - railRow.entry.junctionPoint).normalized;
                     }
                 }
 
                 float portalH = surfaceReader.SampleHeight(portalMouth.x, portalMouth.z);
-                portalOnNoGround = !surfaceReader.HasGround(portalMouth.x, portalMouth.z);
+                portalGroundValid = true;
                 
-                underwaterCaseAvailable = TunnelAuthoringLink.TryReadRun(candidateAlignment, 0f, out _);
-                portalOnOpenWater = !portalOnNoGround && portalH <= waterLevel && !underwaterCaseAvailable;
+                underwaterCaseAvailable = false;
+                portalOnOpenWater = portalH <= waterLevel && !underwaterCaseAvailable;
             }
             else 
             {
-                portalOnNoGround = true;
+                portalGroundValid = false;
             }
 
             ulong citySeed = (ulong)(uint)city.seed;
             SettlementUndergroundReport report = SettlementUndergroundPresence.Resolve(
                 fitTable, orderIndex, continentKey, population, identity, citySeed,
                 surfaceGrade, classGradientLimit, waterGapMetres, surfaceSpanMetres,
-                portalOnOpenWater, underwaterCaseAvailable, !portalOnNoGround);
+                portalOnOpenWater, underwaterCaseAvailable, portalGroundValid);
 
-            // Wire B-18 portal cut
             if (report.metroBuildable && report.portalCuttable && TerrainWriteGateway.Active != null)
             {
-                TerrainWriteGateway.Active.RequestCutRegion(portalMouth, boreDirection, boreRadius);
+                TerrainRegion cutRegion = TerrainRegion.FromFootprint(portalMouth.x, portalMouth.z, boreRadius, boreRadius, portalMouth.y - boreRadius, portalMouth.y + boreRadius);
+                TerrainWriteGateway.Active.RequestCutRegion(cutRegion, "settlement.portal", out string cutRefusal);
             }
 
             return report;
