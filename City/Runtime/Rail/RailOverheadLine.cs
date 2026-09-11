@@ -99,6 +99,69 @@ namespace RoadCityMaster.City
         /// mast height. </summary>
         public float bracketRiseMetres = 0.35f;
 
+        // ---------------------------------------------------------------- what the equipment is physically made of
+
+        /// <summary> How far the mast's own head rises above the point the messenger is fixed at, in metres. A mast is
+        /// not cut off at its topmost fitting: the head carries the bracket's tie tube, the aerial earth wire on many
+        /// lines, and enough steel above the highest bolt hole for the bolt to have metal around it. 0.6 m is what a
+        /// 25 kV mast leaves.
+        ///
+        /// Kept SEPARATE from <see cref="bracketRiseMetres"/> even though both add height at the same place, because
+        /// they are different questions with different answers. The bracket rise is how high the MESSENGER is fixed
+        /// above the contact wire, and it is read by the planner to place a wire. This is how much steel stands above
+        /// that fixing, and it is read only by the mesh. Folding them into one figure would mean an author who wanted
+        /// a taller mast head would silently raise the messenger and with it every dropper on the line. </summary>
+        public float mastTopAboveMessengerMetres = 0.6f;
+
+        /// <summary> How far the mast is buried, in metres. Read ONLY by the mesh, which starts the shaft this far
+        /// below the ground it stands on rather than at the ground exactly.
+        ///
+        /// A 2.2 m augered concrete foundation is what an ordinary 25 kV mast sits in, and the number is here rather
+        /// than as a mesh constant because the depth is a property of the CLASS: a tramway mast in a footway is set
+        /// far shallower than a mainline mast in an embankment, and the same mesh code has to build both.
+        ///
+        /// The buried length is not decoration. The ground under a mast is sampled at the mast's own position, off to
+        /// the side of the formation where it is a different height from the rail head; a shaft that started exactly
+        /// at that sample would show daylight under itself the moment the ground fell away between the sample and the
+        /// shaft's own diameter -- which on a cutting slope is every mast on the run. Burying it is how a real
+        /// foundation solves the same problem and costs one ring of vertices nobody sees. </summary>
+        public float mastFoundationDepthMetres = 2.2f;
+
+        /// <summary> The mast's diameter at ground level and at its head, in metres. Real 25 kV masts are rolled
+        /// H-sections or tapered tubes around 300 mm across the base and 180 mm at the head; the mesh builds a tapered
+        /// tube, which is the tube case exactly and is a fair silhouette of the H-section at any distance a railway is
+        /// looked at from.
+        ///
+        /// Two figures rather than one because the taper is what makes a mast read as a mast: a parallel post of
+        /// constant diameter reads as scaffolding, and the eye picks the difference up at a hundred metres even though
+        /// it cannot measure either figure. </summary>
+        public float mastBaseDiameterMetres = 0.3f;
+        public float mastTopDiameterMetres = 0.18f;
+
+        /// <summary> The diameter of the registration bracket's tube, in metres -- the arm that reaches out from the
+        /// mast over the track and holds the contact wire at its staggered offset. 60 mm is ordinary steel tube for a
+        /// cantilever's main member. </summary>
+        public float bracketTubeDiameterMetres = 0.06f;
+
+        /// <summary> The three wire diameters, in metres, and every one of them is a real conductor size rather than a
+        /// figure chosen to look right.
+        ///
+        /// * The CONTACT wire is 107 mm² grooved hard-drawn copper to BS EN 50149, whose nominal diameter is 12.24 mm.
+        ///   It is grooved rather than round -- the grooves are what the dropper clips grip -- and a round tube of the
+        ///   same nominal diameter is the correct silhouette at every distance the wire is visible from.
+        /// * The MESSENGER is 65 mm² cadmium-copper of nineteen 2.1 mm strands, so its overall diameter is five strand
+        ///   diameters across: 10.5 mm. Thinner than the contact wire, which surprises people, and is right -- the
+        ///   messenger carries weight and the contact wire carries a pantograph wearing it away, so the contact wire is
+        ///   sized for the wear allowance.
+        /// * A DROPPER is 12 mm² stranded copper, about 5 mm over.
+        ///
+        /// These live on the class and not in the mesh file because they differ by column -- a tramway's trolley wire
+        /// is 80 mm² and an LGV's is 150 -- and a mesh holding one figure would build every column's wire at the
+        /// mainline size. </summary>
+        public float contactWireDiameterMetres = 0.01224f;
+        public float messengerWireDiameterMetres = 0.0105f;
+        public float dropperWireDiameterMetres = 0.005f;
+
         public static RailOverheadClass Default() { return new RailOverheadClass(); }
 
         /// <summary> The longest span this class may use through a curve of the given radius, in metres, before the
@@ -218,6 +281,69 @@ namespace RoadCityMaster.City
             {
                 reason = "the wire gradient limit is " + maxWireGradient.ToString("0.#####",
                              CultureInfo.InvariantCulture) + ", which no pantograph follows";
+                return false;
+            }
+            return IsBuildShapeConsistent(out reason);
+        }
+
+        /// <summary> The half of the shape check that only the MESH cares about: the mast's own dimensions and the
+        /// three wire diameters.
+        ///
+        /// Split out rather than folded into the loop above so the split can be stated. Everything above this line is
+        /// read by <see cref="RailOverheadPlanner"/> and decides WHERE the equipment goes; everything below it is read
+        /// only by D-7's mesh and decides WHAT IT LOOKS LIKE. A planner that refused a whole electrified railway
+        /// because an author had typed a zero into a mast diameter would be refusing a line whose wire positions are
+        /// all perfectly good -- but a mesh that silently built a mast of zero diameter would leave a wire hanging in
+        /// the air off nothing, so neither ignoring it nor refusing the plan is right on its own.
+        ///
+        /// The resolution is that this is called from <see cref="IsShapeConsistent"/> anyway -- so an author sees the
+        /// sentence at the top of the inspector, where every other class complaint appears -- and is ALSO callable on
+        /// its own, so the mesh can ask the narrower question without asking the planner's. Public and pure, so D-16
+        /// asserts the wording without a scene. </summary>
+        public bool IsBuildShapeConsistent(out string reason)
+        {
+            if (mastBaseDiameterMetres <= 0f || mastTopDiameterMetres <= 0f)
+            {
+                reason = "the mast measures " + Figure(mastBaseDiameterMetres) + " m across the base and "
+                         + Figure(mastTopDiameterMetres) + " m across the head, so it has no thickness";
+                return false;
+            }
+            if (mastTopDiameterMetres > mastBaseDiameterMetres)
+            {
+                reason = "the mast is " + Figure(mastTopDiameterMetres) + " m across the head and only "
+                         + Figure(mastBaseDiameterMetres) + " m across the base, so it widens as it rises";
+                return false;
+            }
+            if (mastTopAboveMessengerMetres < 0f)
+            {
+                reason = "the mast head stands " + Figure(mastTopAboveMessengerMetres)
+                         + " m above the messenger fixing, so the messenger is fixed above the mast";
+                return false;
+            }
+            if (mastFoundationDepthMetres < 0f)
+            {
+                reason = "the mast foundation is " + Figure(mastFoundationDepthMetres)
+                         + " m deep, so the mast starts above the ground it stands on";
+                return false;
+            }
+            if (bracketTubeDiameterMetres <= 0f)
+            {
+                reason = "the registration bracket's tube is " + Figure(bracketTubeDiameterMetres) + " m across";
+                return false;
+            }
+            if (contactWireDiameterMetres <= 0f || messengerWireDiameterMetres <= 0f
+                || dropperWireDiameterMetres <= 0f)
+            {
+                reason = "the contact wire, messenger and dropper measure " + Figure(contactWireDiameterMetres)
+                         + " m, " + Figure(messengerWireDiameterMetres) + " m and "
+                         + Figure(dropperWireDiameterMetres) + " m across, and a wire with no thickness is not a wire";
+                return false;
+            }
+            if (contactWireDiameterMetres >= mastTopDiameterMetres)
+            {
+                reason = "the contact wire is " + Figure(contactWireDiameterMetres)
+                         + " m across and the mast head only " + Figure(mastTopDiameterMetres)
+                         + " m, so the wire is thicker than what holds it";
                 return false;
             }
             reason = string.Empty;
@@ -593,9 +719,23 @@ namespace RoadCityMaster.City
 
             PlaceMasts(plan, alignment, cls, form, structures, ground, trackCount);
             if (plan.refusals.Count > 0) { return plan; }
+            CheckPerChunkCeiling(plan);
+            if (plan.refusals.Count > 0) { return plan; }
             SmoothWireGradient(plan, cls);
             StringSpans(plan, alignment, cls);
             return plan;
+        }
+
+        /// <summary> D-15. Check that the masts do not exceed their instance ceiling in any one streaming chunk. </summary>
+        private static void CheckPerChunkCeiling(RailOverheadPlan plan)
+        {
+            if (plan.masts.Count == 0) { return; }
+            float chunk = CityStreamingConfig.DefaultChunkSizeMetres;
+            List<Vector3> positions = new List<Vector3>(plan.masts.Count);
+            for (int i = 0; i < plan.masts.Count; i++) { positions.Add(plan.masts[i].basePoint); }
+            int busiest = CityInstanceBudget.BusiestChunkCount(positions, chunk);
+            CityInstanceCeilingVerdict verdict = CityInstanceBudget.Check(CityInstanceFamily.OHLEMast, busiest);
+            if (!verdict.withinCeiling) { plan.refusals.Add(verdict.message); }
         }
 
         /// <summary> Walk the run forward, planting a mast wherever the next one is allowed to be.

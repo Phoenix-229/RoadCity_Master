@@ -71,6 +71,22 @@ namespace RoadCityMaster.City.Editor
         /// in. </summary>
         private string lastBuildLine = string.Empty;
 
+        /// <summary> D-6, third bullet. What every settlement in the scene gets from THIS line, and the one-line
+        /// summary over the list. Null means "not swept since the last change", the same state
+        /// <see cref="cached"/> starts in and invalidated with it -- a re-staked alignment enters a settlement
+        /// somewhere else, so a sweep taken against the old samples is a sweep about a railway that is gone.
+        ///
+        /// Cached for the same reason the plan is: the sweep asks every <c>CityAuthoring</c> in the scene for its
+        /// order, which is a project-wide catalogue search apiece, then clips the whole staked line against each
+        /// footprint. Per repaint that would make selecting a railway in a scene of twenty settlements cost more than
+        /// planning it. </summary>
+        private List<SettlementRailEntryRow> cachedSettlements;
+
+        /// <summary> What the last press of a per-settlement *Build the branch* said, kept beyond its frame. Only one
+        /// is kept, not one per row: two presses in a row are two separate acts and the older sentence describes a
+        /// branch the author has already stopped looking at. </summary>
+        private string lastBranchLine = string.Empty;
+
         /// <summary> What the last class press set. Kept for the same reason the pole line keeps its own: the columns
         /// are the only control here that writes thirty fields at once, so saying which figures moved is the
         /// difference between a button and a surprise. </summary>
@@ -135,6 +151,89 @@ namespace RoadCityMaster.City.Editor
             DrawRefusals(cached);
             if (cachedOverhead != null) { DrawOverheadRefusals(cachedOverhead); }
             DrawCommands(line);
+            DrawSettlementsServed(line);
+        }
+        #endregion
+
+
+        #region "Settlements this line serves"
+        /// <summary> D-6's third bullet, made reachable: what this railway does for every settlement in the scene, and
+        /// the branch it can build to each one it misses.
+        ///
+        /// WHY HERE AND NOT IN THE GRAPH. D-6's first two bullets are a stage-0 node because their inputs are a fitted
+        /// table and four figures, all of which a node parameter can carry. This one's input is a STAKED ALIGNMENT --
+        /// the two hundred world-space samples the plan above just produced -- and no node in the catalogue publishes
+        /// one. The author holds both objects here, so this is where the question is asked.
+        ///
+        /// WHY IT IS DRAWN UNDER THE COMMANDS. The list is a consequence of the line, not an answer about it: it
+        /// changes when the alignment is dragged, and it means nothing until the line is staked. Putting it above the
+        /// build button would put a settlement's branch in front of the railway it leaves.
+        ///
+        /// The sentences are <see cref="SettlementRailEntryProbe"/>'s pure statics, not written here, for the reason
+        /// this whole file gives: a gate cannot open an inspector, and a sentence built inside <c>OnInspectorGUI</c>
+        /// is a sentence no gate has ever read. </summary>
+        private void DrawSettlementsServed(RailAlignment line)
+        {
+            if (cachedSettlements == null)
+            {
+                cachedSettlements = new List<SettlementRailEntryRow>();
+                SettlementRailEntryProbe.ResolveScene(cached.samples, SettlementRailEntry.DefaultTurnoutRatio,
+                    cachedSettlements);
+            }
+
+            int reached = 0;
+            int needBranch = 0;
+            for (int i = 0; i < cachedSettlements.Count; i++)
+            {
+                SettlementRailEntryRow row = cachedSettlements[i];
+                if (row.Answered && row.entry.resolved && row.entry.approach != SettlementRailApproach.Unserved)
+                {
+                    reached++;
+                }
+                if (row.NeedsBranch) { needBranch++; }
+            }
+
+            LegacyInspectorShell.SectionHeader("Settlements this line serves",
+                "Where the line enters a settlement, and where a branch would have to be built to reach one.");
+            EditorGUILayout.LabelField(
+                SettlementRailEntryProbe.SweepLine(cachedSettlements.Count, reached, needBranch),
+                EditorStyles.wordWrappedLabel);
+
+            for (int i = 0; i < cachedSettlements.Count; i++)
+            {
+                DrawSettlementRow(line, cachedSettlements[i]);
+            }
+
+            if (!string.IsNullOrEmpty(lastBranchLine))
+            {
+                EditorGUILayout.LabelField(lastBranchLine, EditorStyles.wordWrappedLabel);
+            }
+        }
+
+        /// <summary> One settlement's line, and its branch button when a branch is what it is owed.
+        ///
+        /// The button is only drawn -- not drawn-and-disabled -- for a settlement that needs a branch, because the
+        /// other three outcomes are not something the author can press their way out of. A place the line already
+        /// runs through needs stations, not a branch; a place with no railway at all needs a bigger settlement; and a
+        /// place beyond its own track budget needs the main line moved. A greyed button beside each of those would
+        /// read as a feature that is temporarily off.
+        ///
+        /// The sweep is invalidated after a build, not patched: the branch that was just laid is a new railway in the
+        /// scene, and every figure in this list was measured against the line without it. </summary>
+        private void DrawSettlementRow(RailAlignment line, SettlementRailEntryRow row)
+        {
+            EditorGUILayout.LabelField("• " + row.Describe(), EditorStyles.wordWrappedLabel);
+            if (!row.NeedsBranch) { return; }
+
+            if (GUILayout.Button("Build the branch to " + row.identity, LegacyInspectorShell.CommandButtonStyle()))
+            {
+                ITerrainSurfaceReader ground = TerrainWriteGateway.Active != null
+                    ? TerrainWriteGateway.Active.SurfaceReader
+                    : null;
+                lastBranchLine = SettlementRailEntryProbe.BuildBranch(line, cached, row,
+                    SettlementRailEntry.DefaultTurnoutRatio, ground);
+                cachedSettlements = null;
+            }
         }
         #endregion
 
@@ -224,6 +323,11 @@ namespace RoadCityMaster.City.Editor
             string overheadNote = string.Empty;
             cachedOverhead = cached != null ? line.PlanOverhead(cached, ground, out overheadNote) : null;
             cachedOverheadNote = cached != null ? overheadNote : note;
+
+            // The settlement sweep is dropped here rather than at each of the two places the plan is invalidated,
+            // because this is the only method that produces a plan: a sweep measured against the samples that were
+            // just replaced is a sweep about a railway that no longer exists, whatever invalidated it.
+            cachedSettlements = null;
         }
         #endregion
 
@@ -347,13 +451,26 @@ namespace RoadCityMaster.City.Editor
             {
                 if (GUILayout.Button("Build the railway", LegacyInspectorShell.CommandButtonStyle()))
                 {
-                    lastBuildLine = RailAlignmentBuilder.Build(line, cached);
+                    lastBuildLine = RailAlignmentBuilder.Build(line, cached, cachedOverhead);
                 }
             }
             if (GUILayout.Button("Clear it", LegacyInspectorShell.CommandButtonStyle()))
             {
                 lastBuildLine = RailAlignmentBuilder.Clear(line);
             }
+            EditorGUILayout.BeginHorizontal();
+            using (new EditorGUI.DisabledScope(!cached.Buildable || !line.settings.electrified))
+            {
+                if (GUILayout.Button("Build OHLE", LegacyInspectorShell.CommandButtonStyle()))
+                {
+                    lastBuildLine = RailAlignmentBuilder.BuildOverheadOnly(line, cachedOverhead);
+                }
+            }
+            if (GUILayout.Button("Clear OHLE", LegacyInspectorShell.CommandButtonStyle()))
+            {
+                lastBuildLine = RailAlignmentBuilder.ClearOverheadLine(line);
+            }
+            EditorGUILayout.EndHorizontal();
             if (GUILayout.Button("Recheck the ground", LegacyInspectorShell.CommandButtonStyle()))
             {
                 cached = null;

@@ -193,7 +193,16 @@ namespace RoadCityMaster.City
         ///   floor RISES to 5.0 m rather than falling, which reads backwards until the reason is stated: on a
         ///   high-speed line the uplift a pantograph puts into the wire is what governs, and a wire pulled down to
         ///   4.17 m under a bridge is a wire that a pantograph at speed hits the bridge with. A high-speed line is
-        ///   built with the clearance instead of borrowing it from the wire. </summary>
+        ///   built with the clearance instead of borrowing it from the wire.
+        ///
+        /// The PHYSICAL sizes -- mast diameters, foundation depth, wire gauges -- move by column too, and for reasons
+        /// that are structural rather than stylistic. A tramway mast is street furniture: it stands in a footway box
+        /// 1.2 m deep, is 220 mm across, and carries an 80 mm² trolley wire because a tram draws a fraction of a
+        /// locomotive's current. A high-speed mast is at the other end: its foundation is piled 3 m because the wire
+        /// it holds is tensioned to roughly twice a classic line's, its 150 mm² silver-copper contact wire is sized
+        /// for that tension and for the wear a 300 km/h pantograph does, and its 116 mm² bronze messenger is nearly as
+        /// thick as the contact wire rather than half of it. The branch and the mainline share the shipped figures,
+        /// because a branch that is electrified at all is electrified to the mainline standard. </summary>
         public static RailOverheadClass Overhead(RailLineClass lineClass)
         {
             RailOverheadClass o = RailOverheadClass.Default();
@@ -212,6 +221,14 @@ namespace RoadCityMaster.City
                     o.constrainedMinimumHeightMetres = 4f;  // road traffic underneath, not the air gap
                     o.maxWireGradient = 0.01f;      // 50 km/h follows a far steeper wire than 300 does
                     o.bracketRiseMetres = 0.2f;
+                    o.mastTopAboveMessengerMetres = 0.3f;
+                    o.mastFoundationDepthMetres = 1.2f;     // a footway box, not an embankment auger
+                    o.mastBaseDiameterMetres = 0.22f;
+                    o.mastTopDiameterMetres = 0.15f;
+                    o.bracketTubeDiameterMetres = 0.048f;
+                    o.contactWireDiameterMetres = 0.0106f;  // 80 mm² grooved copper
+                    o.messengerWireDiameterMetres = 0.0076f; // 35 mm², 7 strands of 2.52 mm
+                    o.dropperWireDiameterMetres = 0.004f;
                     break;
                 case RailLineClass.BranchLine:
                     break;
@@ -224,6 +241,12 @@ namespace RoadCityMaster.City
                     o.dropperSpacingMetres = 4.5f;
                     o.maxWireGradient = 0.001f;             // 1 in 1000: uplift, not comfort
                     o.constrainedMinimumHeightMetres = 5f;  // built with the clearance, not borrowing it
+                    o.mastFoundationDepthMetres = 3f;       // piled, because the tension it holds is doubled
+                    o.mastBaseDiameterMetres = 0.36f;
+                    o.mastTopDiameterMetres = 0.22f;
+                    o.bracketTubeDiameterMetres = 0.07f;
+                    o.contactWireDiameterMetres = 0.0145f;  // 150 mm² silver-copper grooved
+                    o.messengerWireDiameterMetres = 0.0139f; // 116 mm² bronze, 19 strands of 2.79 mm
                     break;
             }
             return o;

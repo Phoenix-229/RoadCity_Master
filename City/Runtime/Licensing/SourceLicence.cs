@@ -47,10 +47,11 @@ namespace RoadCityMaster.City
     /// <summary> The machine-readable form of RM-79's written position: every source file resolves to exactly one
     /// licence, provably, with no file left ambiguous. The rule is pure and total -- <see cref="ClassifyByPath"/>
     /// always returns exactly one <see cref="SourceLicence"/> -- so RM-80 (headers on disk) and RM-70 (the check)
-    /// share one authority rather than each re-deciding. § 10.2's boundary is the rule: new work lives under
-    /// <c>City/</c> and is proprietary; everything else in the tool tree is upstream MIT. The header, when present,
-    /// is authoritative over the path so a new file that lives outside <c>City/</c> can still declare itself
-    /// proprietary honestly. </summary>
+    /// share one authority rather than each re-deciding. RM-106's boundary is the rule: only the frozen set of
+    /// vendored filenames is upstream MIT; every other source in the tool tree is proprietary new work. The header,
+    /// when present, is authoritative over the path, so a vendored file a maintainer has since rewritten can still
+    /// declare itself proprietary honestly, and the default falls to proprietary rather than crediting the upstream
+    /// author with work they did not write. </summary>
     public static class LicenceRule
     {
         // Anchor phrases from the two RM-79 header templates. Chosen so neither is a substring of the other, and
@@ -58,9 +59,10 @@ namespace RoadCityMaster.City
         private const string ProprietaryAnchor = "authored for this project";
         private const string MitAnchor = "Upstream file, MIT licensed";
 
-        /// <summary> The path rule: a file whose tool-relative path has a <c>City</c> segment is proprietary new
-        /// work; anything else in the tool tree is upstream MIT. Total by construction -- exactly one value, always.
-        /// </summary>
+        /// <summary> The path rule: a file whose NAME is in the frozen vendored set
+        /// (<see cref="UpstreamProvenanceRule.IsVendorFile"/>) is upstream MIT; every other source in the tool tree
+        /// is proprietary new work. Matching is by filename, not path, so § 10 moving a vendored file into a
+        /// subfolder is not a licence change. Total by construction -- exactly one value, always. </summary>
         public static SourceLicence ClassifyByPath(string toolRelativePath)
         {
             if (string.IsNullOrEmpty(toolRelativePath)) { return SourceLicence.ProprietaryNew; }

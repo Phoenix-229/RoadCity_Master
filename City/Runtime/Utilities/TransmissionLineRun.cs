@@ -267,7 +267,50 @@ namespace RoadCityMaster.City
             }
 
             BuildSpans(plan, s, elec, steel, ground);
+
+            // D-15. The run has produced its towers and spans; before anything calls it buildable, count how many of
+            // each land in ONE streaming chunk and refuse a pathological run by its own number, rather than shipping a
+            // chunk that stutters on the phone D-15 answers for. The count runs once here at plan time over a finite
+            // run -- never per frame -- so it adds no play-time cost of its own.
+            CheckPerChunkCeilings(plan);
             return plan;
+        }
+
+        // ------------------------------------------------------------------ per-chunk instance ceiling (D-15)
+
+        /// <summary> D-15. A transmission run is INSTANCED content -- one cached tower mesh drawn per tower, one span
+        /// group hung per span -- so the cost that can hurt a phone is not the total but how many of each fall in one
+        /// streaming chunk. Count the busiest chunk for towers and for spans and refuse the run, naming its own count,
+        /// when either is past the family's per-chunk ceiling (<see cref="CityInstanceBudget"/>); the author widens the
+        /// spacing or splits the run rather than being handed a chunk that hitches. The chunk size is the streamer's own
+        /// authored figure, so the "per chunk" the ceiling measures is the "per chunk" the game loads. </summary>
+        private static void CheckPerChunkCeilings(TransmissionLineRunPlan plan)
+        {
+            float chunk = CityStreamingConfig.DefaultChunkSizeMetres;
+
+            List<Vector3> towerPoints = new List<Vector3>(plan.towers.Count);
+            for (int i = 0; i < plan.towers.Count; i++) { towerPoints.Add(plan.towers[i].basePoint); }
+            int busiestTowers = CityInstanceBudget.BusiestChunkCount(towerPoints, chunk);
+            CityInstanceCeilingVerdict towerVerdict =
+                CityInstanceBudget.Check(CityInstanceFamily.TransmissionTower, busiestTowers);
+            if (!towerVerdict.withinCeiling) { Refuse(plan, towerVerdict.message); }
+
+            // A span is placed as one conductor group hung at the midpoint of its two towers; that midpoint is the
+            // chunk it belongs to, the same cell the streamer would bucket the placed set into.
+            List<Vector3> spanPoints = new List<Vector3>(plan.spans.Count);
+            for (int i = 0; i < plan.spans.Count; i++)
+            {
+                TransmissionRunSpan span = plan.spans[i];
+                if (span.fromTowerIndex < 0 || span.fromTowerIndex >= plan.towers.Count
+                    || span.toTowerIndex < 0 || span.toTowerIndex >= plan.towers.Count) { continue; }
+                Vector3 a = plan.towers[span.fromTowerIndex].basePoint;
+                Vector3 b = plan.towers[span.toTowerIndex].basePoint;
+                spanPoints.Add((a + b) * 0.5f);
+            }
+            int busiestSpans = CityInstanceBudget.BusiestChunkCount(spanPoints, chunk);
+            CityInstanceCeilingVerdict spanVerdict =
+                CityInstanceBudget.Check(CityInstanceFamily.TransmissionSpan, busiestSpans);
+            if (!spanVerdict.withinCeiling) { Refuse(plan, spanVerdict.message); }
         }
 
         // ------------------------------------------------------------------ towers

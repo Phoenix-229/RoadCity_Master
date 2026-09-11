@@ -1288,6 +1288,9 @@ namespace RoadCityMaster.City
             Out(entry, "instantiateThisFrame", "List<int>",
                 "the building indices this frame's budget allows, in the order they were queued -- a budget rather than"
                 + " a burst, so arriving in a new chunk does not drop a frame");
+            Out(entry, "instanceCeilings", "List<CityInstanceCeilingVerdict>",
+                "D-15's per-chunk instance ceiling for every generated family (towers, poles, sleepers, railing,"
+                + " furniture) so the budget is visible in the graph, not just enforced when a run is refused");
 
             entry = Add(list, CityNodeKind.BakeStampNode, "Bake stamp", RuntimeSection, BakeStage.ProduceRuntime,
                 CityNodeRole.ShippedCode, "BakeStamp.Create");

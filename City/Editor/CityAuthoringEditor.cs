@@ -135,13 +135,22 @@ namespace RoadCityMaster.City.Editor
             CityBakeReport report;
             string owner;
             string handoff;
-            CityBakeOutputBridge.Apply(city, OwnerKey(city), out handoff);
+            bool applied = CityBakeOutputBridge.Apply(city, OwnerKey(city), out handoff);
             if (!CityBakeTicket.TryTakeReport(out report, out owner)) { return; }
             if (report == null) { return; }
             if (!string.Equals(owner, OwnerKey(city), StringComparison.Ordinal)) { return; }
 
             lastBakeOk = report.ok;
             lastBakeReport = report.report;
+            // B-28. A bake can finish cleanly yet hand over no raster or corridor -- a graph without those nodes. This
+            // runs only on the repaint that took the fresh report, so the bridge's note surfaces once and explains an
+            // empty overlay rather than leaving it reading as broken; a healthy handover says nothing extra.
+            if (!applied && !string.IsNullOrEmpty(handoff))
+            {
+                lastBakeReport = string.IsNullOrEmpty(lastBakeReport)
+                    ? handoff
+                    : lastBakeReport + "  (" + handoff + ")";
+            }
             lastRefusal = string.Empty;
         }
         #endregion
@@ -977,9 +986,31 @@ namespace RoadCityMaster.City.Editor
         /// means -- no order was looked up -- rather than a fabricated village. </summary>
         private static int ResolveSettlementOrder(CityAuthoring city)
         {
+            SettlementOrderClass order;
+            string reason;
+            return TryOrderOf(city, out order, out reason) ? order.orderIndex : 0;
+        }
+
+        /// <summary> The whole order CLASS behind <see cref="ResolveSettlementOrder"/>'s integer, and the reason when
+        /// the project has no answer.
+        ///
+        /// It exists because the index alone is not enough for every caller. D-6's rail-entry probe has to ask the
+        /// presence curve about THIS settlement, and the curve is a function of population -- which is the order's own
+        /// <c>referencePopulation</c>, the same figure <c>SettlementSiting</c> proposes a candidate with. A second
+        /// catalogue search written where that figure is needed would be free to land on a different asset than the one
+        /// the bake stamped, so the search lives here once and the integer above is read off its answer. That is the
+        /// only arrangement in which an inspector's order and a bake's order cannot disagree. </summary>
+        internal static bool TryOrderOf(CityAuthoring city, out SettlementOrderClass order, out string reason)
+        {
+            order = null;
+            if (city == null)
+            {
+                reason = "there is no settlement here to read a role from, so no order can be looked up";
+                return false;
+            }
+
             SettlementRoleEnum role;
-            string roleWhy;
-            if (!city.TryGetSourceRole(out role, out roleWhy)) { return 0; }
+            if (!city.TryGetSourceRole(out role, out reason)) { return false; }
 
             string[] guids = AssetDatabase.FindAssets("t:SettlementOrderCatalog");
             for (int i = 0; i < guids.Length; i++)
@@ -988,11 +1019,13 @@ namespace RoadCityMaster.City.Editor
                     AssetDatabase.GUIDToAssetPath(guids[i]));
                 if (catalogue == null) { continue; }
 
-                SettlementOrderClass order;
                 string orderWhy;
-                if (catalogue.TryOrderFor(role, out order, out orderWhy)) { return order.orderIndex; }
+                if (catalogue.TryOrderFor(role, out order, out orderWhy)) { return true; }
             }
-            return 0;
+
+            reason = "no settlement order catalogue in the project answers the " + role + " role, so this settlement"
+                     + " has no order and no reference population to ask any fitted curve about";
+            return false;
         }
 
         /// <summary> The settlement fit table this bake reads for its railway, metro and transit answers, resolved the
@@ -1007,8 +1040,11 @@ namespace RoadCityMaster.City.Editor
         /// The placeholder is built FROM a settlement order catalogue and not from nothing, because
         /// <see cref="SettlementFitTable.CreateAuthored"/> returns a table with no rail or metro rows for a null
         /// catalogue -- and a table with no rows makes the rail and underground nodes refuse, which reads as a broken
-        /// tool rather than the missing asset it is. So a catalogue is resolved first. </summary>
-        private static SettlementFitTable ResolveSettlementFit()
+        /// tool rather than the missing asset it is. So a catalogue is resolved first.
+        ///
+        /// Internal rather than private because D-6's rail-entry probe reads the same table to ask whether a settlement
+        /// is served at all, and a second search there could answer from a different asset than the bake did. </summary>
+        internal static SettlementFitTable ResolveSettlementFit()
         {
             string[] tableGuids = AssetDatabase.FindAssets("t:SettlementFitTable");
             for (int i = 0; i < tableGuids.Length; i++)

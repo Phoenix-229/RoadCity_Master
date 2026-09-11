@@ -80,7 +80,7 @@ namespace RoadCityMaster.City.Editor
         /// The track count comes from the PLAN and not from the settings. The planner clamped it, staked the formation
         /// at that width and measured every clearance against it; reading the author's field again here would let a
         /// two-track line be built on a formation that was checked as one. </summary>
-        public static string Build(RailAlignment line, RailAlignmentPlan plan)
+        public static string Build(RailAlignment line, RailAlignmentPlan plan, RailOverheadPlan overheadPlan)
         {
             if (line == null) { return "Nothing was built: the builder was handed no railway."; }
             if (plan == null) { return "Nothing was built: the line has not been planned yet."; }
@@ -107,12 +107,14 @@ namespace RoadCityMaster.City.Editor
 
             int pieces = BuildPieces(plan, form, track, tracks, holder, line.name, bedMaterials, steelMaterials);
             int panels = BuildPanels(plan, form, track, tracks, holder, line.name, panelMaterials);
+            
+            string ohleSentence = BuildOverheadLine(line, overheadPlan, holder, undoGroup);
 
             Undo.SetCurrentGroupName(UndoLabel);
             Undo.CollapseUndoOperations(undoGroup);
 
             return BuiltLine(plan, pieces, panels, line.name) + MissingMaterialsNote(s, panels)
-                   + BatchingNote(pieces * 2 + panels + 1);
+                   + BatchingNote(pieces * 2 + panels + 1) + ohleSentence;
         }
 
         /// <summary> Sweep the run into pieces, two objects each.
@@ -227,6 +229,123 @@ namespace RoadCityMaster.City.Editor
             clean = clean.Replace('[', '-').Replace(']', '-').Replace('#', '-');
             return CityHierarchy.NameFor(GeneratedKind.Rail, prefix + clean, ordinal);
         }
+
+        /// <summary> D-7 scene half. Generates the OHLE objects (masts + wires) from the already-computed
+        /// <see cref="RailOverheadPlan"/>. Called after the track is built, because the overhead stands ON
+        /// the track, not beside it. </summary>
+        public static string BuildOverheadLine(
+            RailAlignment alignment,
+            RailOverheadPlan overheadPlan,
+            Transform holder,
+            int undoGroup)
+        {
+            if (alignment == null || alignment.settings == null || !alignment.settings.electrified 
+                || overheadPlan == null || !overheadPlan.Buildable)
+            {
+                return string.Empty;
+            }
+
+            int builtMasts = 0;
+            int builtSpans = 0;
+
+            RailAlignmentSettings s = alignment.settings;
+            Material[] mastMats = new Material[] { s.ohleMastMaterial, s.ohleBracketMaterial };
+            Material[] wireMats = new Material[] { s.ohleWireMaterial, s.ohleWireMaterial };
+
+            // 1. Masts
+            for (int i = 0; i < overheadPlan.masts.Count; i++)
+            {
+                RailOverheadMast mast = overheadPlan.masts[i];
+                string name = Named("mast.rail.", alignment.name, i);
+                GameObject go;
+
+                if (s.ohleMastPrefab != null)
+                {
+                    go = UnityEngine.Object.Instantiate(s.ohleMastPrefab);
+                    go.name = name;
+                    
+                    // Rotation: +X faces the track
+                    // Since mast.basePoint is laterally offset, we need the tangent. We can use MeshScratch.FrameAt
+                    Vector3 fwd, right, up, pos;
+                    RailTrackMeshes.FrameAt(alignment.settings.plan.samples, 0, alignment.settings.plan.samples.Count, mast.stationMetres, s.track.cantFormulaGaugeMillimetres, out pos, out fwd, out right, out up);
+                    
+                    // We face track. If staggerSign is -1, track is to our right? No, mast stands at lateral offset.
+                    // The track is at -right * (MastClearOfFormationMetres + halfWidth).
+                    // So +X should be -right.
+                    go.transform.SetPositionAndRotation(mast.basePoint, Quaternion.LookRotation(fwd, up) * Quaternion.Euler(0, -90 * mast.staggerSign, 0));
+                }
+                else
+                {
+                    OHLEMastMeshKey key = new OHLEMastMeshKey
+                    {
+                        baseDiameter = s.overhead.mastBaseDiameterMetres,
+                        topDiameter = s.overhead.mastTopDiameterMetres,
+                        bracketTubeDiameter = s.overhead.bracketTubeDiameterMetres,
+                        foundationDepth = s.overhead.mastFoundationDepthMetres,
+                        mastTopAboveMessenger = s.overhead.mastTopAboveMessengerMetres,
+                        railHeadAboveGround = mast.railHeadAboveGroundMetres,
+                        messengerHeight = mast.messengerHeightMetres,
+                        stagger = mast.staggerMetres,
+                        staggerSign = mast.staggerSign,
+                        halfFormationWidth = (float)s.formation.FormationWidthMetres(s.trackCount) * 0.5f
+                    };
+                    Mesh mesh = OHLEMastMesh.GetOrCreate(key);
+                    go = new GameObject(name);
+                    go.transform.position = mast.basePoint;
+                    
+                    Vector3 fwd, right, up, pos;
+                    RailTrackMeshes.FrameAt(alignment.settings.plan.samples, 0, alignment.settings.plan.samples.Count, mast.stationMetres, s.track.cantFormulaGaugeMillimetres, out pos, out fwd, out right, out up);
+                    
+                    go.transform.rotation = Quaternion.LookRotation(fwd, up);
+
+                    MeshFilter filter = go.AddComponent<MeshFilter>();
+                    filter.sharedMesh = mesh;
+                    MeshRenderer renderer = go.AddComponent<MeshRenderer>();
+                    renderer.sharedMaterials = mastMats;
+                }
+                
+                go.transform.SetParent(holder, true);
+                Undo.RegisterCreatedObjectUndo(go, UndoLabel);
+                builtMasts++;
+            }
+
+            // 2. Wires
+            for (int i = 0; i < overheadPlan.spans.Count; i++)
+            {
+                RailOverheadSpan span = overheadPlan.spans[i];
+                RailOverheadMast fromMast = overheadPlan.masts[span.fromMastIndex];
+                RailOverheadMast toMast = overheadPlan.masts[span.toMastIndex];
+                
+                Vector3 fwd1, right1, up1, pos1;
+                RailTrackMeshes.FrameAt(alignment.settings.plan.samples, 0, alignment.settings.plan.samples.Count, fromMast.stationMetres, s.track.cantFormulaGaugeMillimetres, out pos1, out fwd1, out right1, out up1);
+                
+                Vector3 fwd2, right2, up2, pos2;
+                RailTrackMeshes.FrameAt(alignment.settings.plan.samples, 0, alignment.settings.plan.samples.Count, toMast.stationMetres, s.track.cantFormulaGaugeMillimetres, out pos2, out fwd2, out right2, out up2);
+                
+                Vector3 p1CatW = pos1 + up1 * fromMast.messengerHeightMetres + right1 * (fromMast.staggerMetres * fromMast.staggerSign);
+                Vector3 p2CatW = pos2 + up2 * toMast.messengerHeightMetres + right2 * (toMast.staggerMetres * toMast.staggerSign);
+                
+                Vector3 p1ConW = pos1 + up1 * fromMast.contactWireHeightMetres + right1 * (fromMast.staggerMetres * fromMast.staggerSign);
+                Vector3 p2ConW = pos2 + up2 * toMast.contactWireHeightMetres + right2 * (toMast.staggerMetres * toMast.staggerSign);
+
+                string name = Named("wire.rail.", alignment.name, i);
+                Mesh mesh;
+                OHLEWireMesh.BuildSpan(span, fromMast, toMast, p1CatW, p2CatW, p1ConW, p2ConW, fromMast.basePoint, s.overhead, out mesh);
+                
+                GameObject go = new GameObject(name);
+                go.transform.SetPositionAndRotation(fromMast.basePoint, Quaternion.identity);
+                MeshFilter filter = go.AddComponent<MeshFilter>();
+                filter.sharedMesh = mesh;
+                MeshRenderer renderer = go.AddComponent<MeshRenderer>();
+                renderer.sharedMaterials = wireMats;
+                
+                go.transform.SetParent(holder, true);
+                Undo.RegisterCreatedObjectUndo(go, UndoLabel);
+                builtSpans++;
+            }
+
+            return " OHLE: " + builtMasts + " masts, " + builtSpans + " spans built.";
+        }
         #endregion
 
 
@@ -243,6 +362,55 @@ namespace RoadCityMaster.City.Editor
             Undo.SetCurrentGroupName(ClearLabel);
             Undo.CollapseUndoOperations(undoGroup);
             return ClearedLine(removed);
+        }
+
+        /// <summary> Clear only the overhead line equipment. </summary>
+        public static string ClearOverheadLine(RailAlignment line)
+        {
+            if (line == null) { return "Nothing was cleared."; }
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            int removed = 0;
+            Transform holder = FindHolder(line);
+            if (holder != null)
+            {
+                for (int i = holder.childCount - 1; i >= 0; i--)
+                {
+                    Transform child = holder.GetChild(i);
+                    if (child.name.Contains("[mast.rail.") || child.name.Contains("[wire.rail."))
+                    {
+                        removed += RemoveTree(child.gameObject);
+                    }
+                }
+            }
+            Undo.SetCurrentGroupName("Clear OHLE");
+            Undo.CollapseUndoOperations(undoGroup);
+            return "Cleared " + removed + " OHLE objects.";
+        }
+
+        /// <summary> Build only the overhead line equipment. </summary>
+        public static string BuildOverheadOnly(RailAlignment line, RailOverheadPlan overheadPlan)
+        {
+            if (line == null || overheadPlan == null) { return "Nothing built."; }
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            ClearOverheadLine(line); // Remove old OHLE
+            Transform holder = FindHolder(line);
+            if (holder == null) { return "Please build the railway first."; }
+            string sentence = BuildOverheadLine(line, overheadPlan, holder, undoGroup);
+            Undo.SetCurrentGroupName("Build OHLE");
+            Undo.CollapseUndoOperations(undoGroup);
+            return sentence;
+        }
+
+        private static Transform FindHolder(RailAlignment line)
+        {
+            for (int i = 0; i < line.transform.childCount; i++)
+            {
+                Transform child = line.transform.GetChild(i);
+                if (child.name.StartsWith("Rail[run.rail.", System.StringComparison.Ordinal)) { return child; }
+            }
+            return null;
         }
 
         /// <summary> Destroy the children this builder made, and only those.
@@ -306,7 +474,8 @@ namespace RoadCityMaster.City.Editor
             if (!CityHierarchy.TryParseName(name, out element)) { return false; }
             return element.StartsWith(BedElement, StringComparison.Ordinal)
                    || element.StartsWith(SteelElement, StringComparison.Ordinal)
-                   || element.StartsWith(PanelElement, StringComparison.Ordinal);
+                   || element.StartsWith(PanelElement, StringComparison.Ordinal)
+                   || element.StartsWith("wire.rail.", StringComparison.Ordinal);
         }
         #endregion
 

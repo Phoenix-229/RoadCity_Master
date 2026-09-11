@@ -39,9 +39,15 @@ namespace RoadCityMaster.City
     [Serializable]
     public sealed class CityStreamingConfig
     {
+        /// <summary> AUTHORED. The default chunk edge length in metres, named as a constant so it is the ONE authored
+        /// figure both this config and D-15's per-chunk instance ceilings (<see cref="CityInstanceBudget"/>) measure
+        /// against -- a run's planner buckets its instances by this same size when it checks a family ceiling, so the
+        /// "per chunk" the ceiling talks about is the "per chunk" the streamer loads. </summary>
+        public const float DefaultChunkSizeMetres = 100f;
+
         /// <summary> AUTHORED. Chunk edge length in metres. The streaming grid is square; a building's chunk is
         /// its world XZ floored by this. ~100 m is one large city block -- the scale the terrain streams at. </summary>
-        public float chunkSizeMetres = 100f;
+        public float chunkSizeMetres = DefaultChunkSizeMetres;
 
         /// <summary> AUTHORED. Chebyshev ring radius of resident chunks around the camera's chunk. Radius 2 is a
         /// 5x5 = 25-chunk neighbourhood; the player's own chunk is always resident (the "+1"), matching the

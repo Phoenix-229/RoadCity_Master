@@ -233,6 +233,11 @@ namespace RoadCityMaster.City
 
             BuildPoles(plan, stations, candidates, centreline, cumulative, roadHalfWidthMetres, s, e, shape, ground);
             BuildSpans(plan, s, e, ground, overRoadway);
+
+            // D-15. Before the plan is called buildable, count how many poles and spans fall in one streaming chunk
+            // and refuse a pathological run by its own number, so a chunk that would stutter on the phone is turned
+            // back here at plan time rather than shipped.
+            CheckPerChunkCeilings(plan);
             return plan;
         }
 
@@ -654,6 +659,40 @@ namespace RoadCityMaster.City
             tangent.y = 0f;
             if (tangent.sqrMagnitude < 1e-8f) { tangent = Vector3.forward; }
             else { tangent.Normalize(); }
+        }
+
+        // ------------------------------------------------------------------ per-chunk instance ceiling (D-15)
+
+        /// <summary> D-15. A pole line is INSTANCED content -- one cached pole mesh per pole, one conductor group per
+        /// span -- so what can hurt a phone is how many of each land in ONE streaming chunk, not the run's total. Count
+        /// the busiest chunk for poles and for spans and refuse the run, naming its own count, when either is past the
+        /// family's per-chunk ceiling (<see cref="CityInstanceBudget"/>); the author widens the span or splits the run.
+        /// The chunk size is the streamer's own authored figure, and the count runs once here at plan time, never per
+        /// frame, so it adds no play-time cost of its own. </summary>
+        private static void CheckPerChunkCeilings(RoadPowerLinePlan plan)
+        {
+            float chunk = CityStreamingConfig.DefaultChunkSizeMetres;
+
+            List<Vector3> polePoints = new List<Vector3>(plan.poles.Count);
+            for (int i = 0; i < plan.poles.Count; i++) { polePoints.Add(plan.poles[i].buttPoint); }
+            CityInstanceCeilingVerdict poleVerdict = CityInstanceBudget.Check(
+                CityInstanceFamily.DistributionPole, CityInstanceBudget.BusiestChunkCount(polePoints, chunk));
+            if (!poleVerdict.withinCeiling) { Refuse(plan, poleVerdict.message); }
+
+            // A span's conductor group hangs at the midpoint of its two poles; that midpoint is the chunk it belongs
+            // to, the same cell the streamer would bucket the placed set into.
+            List<Vector3> spanPoints = new List<Vector3>(plan.spans.Count);
+            for (int i = 0; i < plan.spans.Count; i++)
+            {
+                RoadPowerLineSpan span = plan.spans[i];
+                if (!Indexed(plan, span.fromPoleIndex) || !Indexed(plan, span.toPoleIndex)) { continue; }
+                Vector3 a = plan.poles[span.fromPoleIndex].buttPoint;
+                Vector3 b = plan.poles[span.toPoleIndex].buttPoint;
+                spanPoints.Add((a + b) * 0.5f);
+            }
+            CityInstanceCeilingVerdict spanVerdict = CityInstanceBudget.Check(
+                CityInstanceFamily.OverheadLineSpan, CityInstanceBudget.BusiestChunkCount(spanPoints, chunk));
+            if (!spanVerdict.withinCeiling) { Refuse(plan, spanVerdict.message); }
         }
 
         /// <summary> Record why nothing was planned and hand the empty plan back. A refusal is an answer. </summary>

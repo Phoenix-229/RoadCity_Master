@@ -867,6 +867,25 @@ namespace RoadCityMaster
                 "The material a level-crossing panel wears. A fourth slot because a crossing surface is neither "
                 + "ballast nor timber nor steel: it is rubber or concrete, laid by the road authority rather than by "
                 + "the railway. It is only asked for when the line actually crosses a road.");
+            Row(f, Rail, "settings.ohleMastMaterial", "Mast material", FieldGroup.WhatItLooksLike, FieldUnit.None,
+                FieldRange.None(),
+                "The material the OHLE mast and foundation wear. Left empty the line still builds and renders in Unity's "
+                + "missing-material pink.");
+            Row(f, Rail, "settings.ohleBracketMaterial", "Bracket material", FieldGroup.WhatItLooksLike, FieldUnit.None,
+                FieldRange.None(),
+                "The material the bracket and fittings wear. Left empty the line still builds and renders in Unity's "
+                + "missing-material pink.");
+            Row(f, Rail, "settings.ohleWireMaterial", "Wire material", FieldGroup.WhatItLooksLike, FieldUnit.None,
+                FieldRange.None(),
+                "The material the catenary, droppers and contact wire wear. A separate slot because wire is polished "
+                + "copper or alloy, which catches light completely differently from a steel mast.");
+            Row(f, Rail, "settings.ohleMastPrefab", "Mast prefab", FieldGroup.WhatItLooksLike, FieldUnit.None,
+                FieldRange.None(),
+                "Optional authored mast to replace the generated steel tube. If given, this prefab is placed at each "
+                + "mast position, scaled 1:1, oriented with +X facing the track. The wires are still generated.");
+            Row(f, Rail, "settings.ohleWirePrefab", "Wire prefab", FieldGroup.WhatItLooksLike, FieldUnit.None,
+                FieldRange.None(),
+                "Optional authored catenary wire prefab. Rare, but offered so authors can override the generated wire.");
         }
 
         /// <summary> B-27 / D-14's rows: a cross-country transmission run, placed as a polyline the author drags. It is

@@ -75,11 +75,11 @@ namespace RoadCityMaster.City.Editor
         private static void CasePathRuleIsTotalAndCorrect(List<string> failures)
         {
             Expect(LicenceRule.ClassifyByPath("City/Runtime/Data/PrefabManifest.cs") == SourceLicence.ProprietaryNew,
-                "a City/ file must classify proprietary.", failures);
+                "an unlisted filename under City/ must classify proprietary.", failures);
             Expect(LicenceRule.ClassifyByPath("city/editor/foo.cs") == SourceLicence.ProprietaryNew,
-                "the City segment test must be case-insensitive.", failures);
+                "an unlisted filename must classify proprietary whatever the folder case.", failures);
             Expect(LicenceRule.ClassifyByPath("City") == SourceLicence.ProprietaryNew,
-                "the bare City folder must classify proprietary.", failures);
+                "a bare folder name is not a vendored filename, so it must classify proprietary.", failures);
             Expect(LicenceRule.ClassifyByPath("Scripts/Road.cs") == SourceLicence.UpstreamMit,
                 "a frozen vendor Scripts/ file must classify upstream MIT by provenance.", failures);
             Expect(LicenceRule.ClassifyByPath("README.md") == SourceLicence.ProprietaryNew,
@@ -163,9 +163,10 @@ namespace RoadCityMaster.City.Editor
 
         /// <summary> The provable-now core of RM-79: enumerate every `.cs` in the real tool tree and show the path
         /// rule assigns each to exactly one of the two licences, with both partitions non-empty (there IS
-        /// proprietary City work and there IS vendor MIT code). Header coverage on disk is REPORTED, not asserted --
-        /// writing the per-file headers is RM-80 and enforcing their presence is RM-70, so a Missing header is
-        /// counted, never failed on. </summary>
+        /// proprietary project work and there IS vendor MIT code). Header coverage on disk is now ASSERTED, not just
+        /// reported -- every file must carry a present, unambiguous, readable licence header, so a Missing,
+        /// Conflicting, or unreadable header fails the gate rather than being counted and passed. The header text is
+        /// not cross-checked against the assigned provenance here; that agreement is the stamper's job. </summary>
         private static void CaseEveryFileInTreeResolvesToOneLicence(List<string> failures, StringBuilder sb)
         {
             string root = Path.Combine(Application.dataPath, "RoadCityMaster");

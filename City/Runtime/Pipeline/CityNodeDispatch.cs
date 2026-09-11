@@ -2389,6 +2389,20 @@ namespace RoadCityMaster.City
 
                 context.bus.Publish(node.id, "chunksToLoad", chunksToLoad);
                 context.bus.Publish(node.id, "instantiateThisFrame", thisFrame);
+
+                // D-15: the per-chunk instance ceilings, published so the budget an author's runs are refused against
+                // is visible on the graph, not only felt when a pathological run trips it. A pure static table, built
+                // fresh here -- no per-frame cost, nothing to persist.
+                List<CityInstanceCeilingVerdict> ceilings = CityInstanceBudget.AllCeilings();
+                context.bus.Publish(node.id, "instanceCeilings", ceilings);
+                string budget = string.Empty;
+                for (int i = 0; i < ceilings.Count; i++)
+                {
+                    budget += (i > 0 ? ", " : string.Empty) + CityInstanceBudget.Name(ceilings[i].family) + " "
+                              + ceilings[i].ceiling.ToString(CultureInfo.InvariantCulture);
+                }
+                remarks.Add("per-chunk instance ceilings (D-15) -- a run past any of these is refused: " + budget);
+
                 itemCount = chunksToLoad.Count;
                 if (queued > thisFrame.Count)
                 {

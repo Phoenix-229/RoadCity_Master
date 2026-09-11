@@ -15,15 +15,32 @@ using UnityEngine;
 
 namespace RoadCityMaster.City.Editor
 {
-    /// <summary> D-15 through D-17's aggregate gate. It composes the existing focused gates and checks the three
-    /// remaining cross-cutting promises: every content family has one mobile instance ceiling, a ceiling refuses an
-    /// overfull chunk, and every manifest row names the placement rule that consumes it. The gate is deliberately
-    /// headless; frame time remains a device measurement, while the deterministic contracts beneath it are asserted. </summary>
+    /// <summary> D-11 through D-17's aggregate gate: the single headless certificate that the whole content register's
+    /// cross-cutting promises hold. It COMPOSES the focused gates that each own one clause with its own verified API --
+    /// the distribution-pole gate (NESC clearance refused in centimetres), the rail-track gate (a radius under the class
+    /// minimum refused), the transport-hub gate (a port refused the water depth it lacks), plus the transmission,
+    /// streaming and manifest gates -- and asserts DIRECTLY the invariants that no single focused gate owns:
+    ///
+    ///   * one shared catenary surface and no straight-cable solver beside it (D-1 / D-14);
+    ///   * equal parameters return one cached mesh, for BOTH instanced families the tool builds itself -- the
+    ///     transmission tower and the distribution pole (D-15's cost model);
+    ///   * rail and metro PRESENCE is read from a fitted row, never a hard-coded literal (D-9);
+    ///   * nothing is placed where the water surface rejects the ground (D-12 / B-15);
+    ///   * a transmission leg crossing a settlement is reported before build (D-14);
+    ///   * a dam computes a linker request and STATES it, deferring the terrain write to Universe Creator, without
+    ///     touching UC on this side of the linker (D-13);
+    ///   * every generated instance family declares a positive, fail-closed per-chunk ceiling (D-15);
+    ///   * every manifest row names the placement rule that consumes it, and is REACHABLE as both a graph node
+    ///     and an inspector entry -- the proof that no catalogued content is stub core (D-17).
+    ///
+    /// The gate is deliberately headless: frame time remains a device measurement, while the deterministic contracts
+    /// beneath it are asserted here. Discovered by the suite through its public <see cref="Run"/>, so it needs no
+    /// registration. </summary>
     public static class CityD15D16D17Gate
     {
         private const string Prefix = "RCMD15D17";
 
-        [MenuItem("Window/Road City Master/Testing/D-15 to D-17")]
+        [MenuItem("Window/Road City Master/Testing/D-11 to D-17")]
         public static void RunFromMenu()
         {
             string report;
@@ -48,9 +65,14 @@ namespace RoadCityMaster.City.Editor
             CaseExistingGates(failures, output);
             CaseOneCatenarySurface(failures, output);
             CaseCachedTowerMesh(failures, output);
+            CaseCachedPoleMesh(failures, output);
+            CaseFittedTransitRow(failures, output);
+            CaseWaterRejection(failures, output);
             CaseSettlementRefusal(failures, output);
+            CaseDamLinker(failures, output);
             CaseInstanceBudgets(failures, output);
             CaseManifestReconciliation(failures, output);
+            CaseManifestReachability(failures, output);
 
             for (int i = 0; i < failures.Count; i++)
             {
@@ -64,13 +86,24 @@ namespace RoadCityMaster.City.Editor
             return failures.Count == 0;
         }
 
+        /// <summary> Compose the focused gates that each own one D-clause with its own verified assertions, rather than
+        /// duplicate their API here where a copy could drift. Each of these has been read to confirm it asserts the
+        /// clause named beside it: the pole gate the NESC clearance, the rail gate the class-minimum radius, the hub
+        /// gate the port water depth. This aggregate fails if any of them does, which is what an aggregate is for. </summary>
         private static void CaseExistingGates(List<string> failures, StringBuilder output)
         {
             string ignored;
-            Expect(CityTransmissionLineGate.Run(out ignored), "D-16: transmission gate failed", failures);
+            Expect(CityTransmissionLineGate.Run(out ignored), "D-14: transmission gate failed", failures);
             Expect(CityStreamingGate.Run(out ignored), "D-15: streaming gate failed", failures);
             Expect(CityPrefabManifestGate.Run(out ignored), "D-17: manifest gate failed", failures);
-            output.Append(Prefix).AppendLine(" focused transmission, streaming and manifest gates passed");
+            Expect(CityDistributionPoleGate.Run(out ignored),
+                "D-16: distribution-pole gate (NESC road clearance refused in centimetres) failed", failures);
+            Expect(CityRailTrackGate.Run(out ignored),
+                "D-16: rail-track gate (a radius under the class minimum refused) failed", failures);
+            Expect(CityTransportHubGate.Run(out ignored),
+                "D-16: transport-hub gate (a port refused the water depth it lacks) failed", failures);
+            output.Append(Prefix)
+                .AppendLine(" focused transmission, streaming, manifest, pole, rail and hub gates passed");
         }
 
         private static void CaseOneCatenarySurface(List<string> failures, StringBuilder output)
@@ -94,6 +127,54 @@ namespace RoadCityMaster.City.Editor
             output.Append(Prefix).AppendLine(" equal tower parameters reuse one cached mesh");
         }
 
+        /// <summary> D-15's cost model for the OTHER instanced family the tool builds itself: a distribution pole. The
+        /// tower case above proves the transmission family; this proves the pole family, so both of the two mesh
+        /// builders the house rules permit are shown to answer one cached mesh per parameter set. </summary>
+        private static void CaseCachedPoleMesh(List<string> failures, StringBuilder output)
+        {
+            PoleGeometryClass shape = PoleGeometryClass.Default();
+            PoleMeshKey key = PoleMeshKey.For(shape, null, PoleFittings.Line, 3, 0);
+            Mesh first = PoleMeshFactory.Get(key, shape);
+            Mesh second = PoleMeshFactory.Get(key, shape);
+            Expect(first != null && ReferenceEquals(first, second),
+                "D-15/D-2: equal pole parameters did not reuse one cached mesh", failures);
+            output.Append(Prefix).AppendLine(" equal pole parameters reuse one cached mesh");
+        }
+
+        /// <summary> D-9. Rail and metro PRESENCE at a settlement is a fitted-row lookup, not a literal: a table
+        /// authored from a null catalogue carries no rail or metro rows, so the presence question answers "no" because
+        /// the ROW is absent -- proving the answer follows the data and is never hard-coded to yes. </summary>
+        private static void CaseFittedTransitRow(List<string> failures, StringBuilder output)
+        {
+            SettlementFitTable table = SettlementFitTable.CreateAuthored(null);
+            SettlementRailFitRow railRow;
+            SettlementRailFitRow metroRow;
+            bool fallback;
+            bool hasRail = table.TryGetRail(1, SettlementFitTable.WorldKey, out railRow, out fallback);
+            bool hasMetro = table.TryGetUnderground(1, SettlementFitTable.WorldKey, out metroRow, out fallback);
+            Expect(!hasRail && railRow == null,
+                "D-16: rail presence did not come from a fitted row (a null-catalogue table reported rail)", failures);
+            Expect(!hasMetro && metroRow == null,
+                "D-16: metro presence did not come from a fitted row (a null-catalogue table reported metro)",
+                failures);
+            output.Append(Prefix).AppendLine(" rail and metro presence are read from a fitted row, never a literal");
+        }
+
+        /// <summary> D-12 / B-15. Nothing is placed where the water surface rejects the ground: the one shared
+        /// <see cref="BuildableLandTest.WaterRejects"/> predicate refuses a lowest ground within the freeboard of the
+        /// water and accepts one that stands well clear, so the city layer and the site test judge water in one voice. </summary>
+        private static void CaseWaterRejection(List<string> failures, StringBuilder output)
+        {
+            BuildabilityCriteria criteria = BuildabilityCriteria.Default();
+            string reason;
+            bool inWater = BuildableLandTest.WaterRejects(2f, 5f, criteria, out reason);
+            Expect(inWater && reason.Length > 0,
+                "D-16: ground within the water freeboard was not refused", failures);
+            bool dry = BuildableLandTest.WaterRejects(50f, 5f, criteria, out reason);
+            Expect(!dry, "D-16: ground standing well clear of the water surface was wrongly refused", failures);
+            output.Append(Prefix).AppendLine(" no structure is placed where the water surface rejects the ground");
+        }
+
         private static void CaseSettlementRefusal(List<string> failures, StringBuilder output)
         {
             TransmissionLineRunSettings settings = TransmissionLineRunSettings.Default();
@@ -106,22 +187,52 @@ namespace RoadCityMaster.City.Editor
             output.Append(Prefix).AppendLine(" settlement crossing is reported before build");
         }
 
+        /// <summary> D-13. The dam computes a linker request and STATES it, without touching Universe Creator on this
+        /// side. Two ends prove it: with no terrain reader the request is REFUSED with a stated reason rather than
+        /// thrown (fail-closed, nothing touched); on readable ground it RESOLVES and its own description names the
+        /// Universe Creator hand-off, which is the request saying the terrain write happens over there, not here. </summary>
+        private static void CaseDamLinker(List<string> failures, StringBuilder output)
+        {
+            DamRequest none = DamWorks.Resolve(null, 0.0, 0.0, 0.0, 0.0, 8.0, 1.5, 120.0, 6.0, 2.0, 2.0,
+                default(SpillwayType), 7.5, 10.0, 1.0, 1.5, 1.0, 5.0, 2000, 24);
+            Expect(!none.resolved && none.refusal.Length > 0,
+                "D-16: a dam with no terrain reader was not refused with a stated reason", failures);
+
+            DamRequest onFlat = DamWorks.Resolve(new FlatGround(), 0.0, 0.0, 0.0, 0.0, 8.0, 1.5, 120.0, 6.0,
+                2.0, 2.0, default(SpillwayType), 7.5, 10.0, 1.0, 1.5, 1.0, 5.0, 2000, 24);
+            Expect(onFlat.resolved, "D-16: a dam on readable ground did not resolve into a linker request", failures);
+            Expect(onFlat.Describe().Contains("Universe Creator"),
+                "D-16: a resolved dam request does not state the Universe Creator hand-off it defers the terrain "
+                + "write to", failures);
+            output.Append(Prefix).AppendLine(" a dam states a linker request and defers the terrain write to UC");
+        }
+
+        /// <summary> D-15. Every GENERATED instance family declares a positive per-chunk ceiling, and the ceiling is
+        /// fail-closed: a chunk exactly at the ceiling is allowed, one instance past it is refused with a message that
+        /// names the ceiling. This asserts the WIRED budget the planners and the streaming node consult
+        /// (<see cref="CityInstanceBudget"/>), which is the one the tool actually enforces. </summary>
         private static void CaseInstanceBudgets(List<string> failures, StringBuilder output)
         {
-            IReadOnlyList<CityInstanceBudgetRule> rules = CityInstanceBudgets.All;
-            Expect(rules.Count == 11, "D-15: expected one ceiling for each of the 11 content families", failures);
-            for (int i = 0; i < rules.Count; i++)
+            List<CityInstanceCeilingVerdict> ceilings = CityInstanceBudget.AllCeilings();
+            Expect(ceilings.Count == 7,
+                "D-15: expected one per-chunk ceiling for each of the 7 generated families; got " + ceilings.Count,
+                failures);
+            for (int i = 0; i < ceilings.Count; i++)
             {
-                string refusal;
-                Expect(rules[i].maximumInstancesPerChunk > 0,
-                    "D-15: " + rules[i].family + " has no positive ceiling", failures);
-                Expect(CityInstanceBudgets.TryValidate(rules[i].family, rules[i].maximumInstancesPerChunk,
-                    out refusal), "D-15: legal count failed for " + rules[i].family, failures);
-                Expect(!CityInstanceBudgets.TryValidate(rules[i].family,
-                    rules[i].maximumInstancesPerChunk + 1, out refusal) && refusal.Contains("ceiling"),
-                    "D-15: overfull " + rules[i].family + " chunk was not refused", failures);
+                CityInstanceFamily family = ceilings[i].family;
+                int ceiling = CityInstanceBudget.CeilingFor(family);
+                Expect(ceiling > 0,
+                    "D-15: " + CityInstanceBudget.Name(family) + " declares no positive per-chunk ceiling", failures);
+                CityInstanceCeilingVerdict atCeiling = CityInstanceBudget.Check(family, ceiling);
+                Expect(atCeiling.withinCeiling,
+                    "D-15: a chunk exactly at the ceiling for " + CityInstanceBudget.Name(family) + " was refused",
+                    failures);
+                CityInstanceCeilingVerdict over = CityInstanceBudget.Check(family, ceiling + 1);
+                Expect(!over.withinCeiling && over.message.Contains("ceiling"),
+                    "D-15: an overfull chunk for " + CityInstanceBudget.Name(family) + " was not refused with the "
+                    + "ceiling named", failures);
             }
-            output.Append(Prefix).AppendLine(" every content family has a fail-closed per-chunk ceiling");
+            output.Append(Prefix).AppendLine(" every generated instance family has a fail-closed per-chunk ceiling");
         }
 
         private static void CaseManifestReconciliation(List<string> failures, StringBuilder output)
@@ -140,6 +251,39 @@ namespace RoadCityMaster.City.Editor
                 "D-17: " + missingConsumers + " manifest row(s) have no placement consumer", failures);
             output.Append(Prefix).Append(" manifest rows ").Append(categories.Count)
                 .Append(", sections ").Append(sections.Count).AppendLine(", placement consumers complete");
+        }
+
+        /// <summary> D-17. The reconciliation's proof that no catalogued content is stub core: every manifest
+        /// category is REACHABLE on both author surfaces. In the node graph, <see cref="CityNodeCatalog"/> makes
+        /// exactly one element node per category, so the element ids equal the manifest ids -- none missing, none
+        /// invented; in the inspector, <see cref="ManifestInstaller.EnsureAllCategories"/> seeds one content entry
+        /// per row into a fresh set. Content offered on neither surface would show here as a count that no longer
+        /// matches. </summary>
+        private static void CaseManifestReachability(List<string> failures, StringBuilder output)
+        {
+            IReadOnlyList<ManifestCategory> categories = PrefabManifest.Categories;
+            HashSet<string> manifestIds = new HashSet<string>();
+            for (int i = 0; i < categories.Count; i++) { manifestIds.Add(categories[i].categoryId); }
+
+            HashSet<string> elementIds = new HashSet<string>();
+            IReadOnlyList<CityNodeDescriptor> entries = CityNodeCatalog.Entries;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                string id = entries[i].elementCategoryId;
+                if (!string.IsNullOrEmpty(id)) { elementIds.Add(id); }
+            }
+            Expect(elementIds.Count == manifestIds.Count && elementIds.SetEquals(manifestIds),
+                "D-17: the node graph does not offer exactly one element node per manifest category (graph "
+                + elementIds.Count + ", manifest " + manifestIds.Count + ")", failures);
+
+            CategoryContentSet set = ScriptableObject.CreateInstance<CategoryContentSet>();
+            int seeded = ManifestInstaller.EnsureAllCategories(set);
+            Expect(seeded == categories.Count,
+                "D-17: a fresh inspector content set was not seeded one entry per manifest row (seeded "
+                + seeded + ", rows " + categories.Count + ")", failures);
+            UnityEngine.Object.DestroyImmediate(set);
+            output.Append(Prefix)
+                .AppendLine(" every manifest category is reachable as a node and an inspector entry");
         }
 
         private sealed class FlatGround : ITerrainSurfaceReader

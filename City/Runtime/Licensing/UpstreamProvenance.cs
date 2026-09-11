@@ -78,11 +78,12 @@ namespace RoadCityMaster.City
     /// So provenance is derived: a `.cs` file in the tool tree is vendor-derived if and only if its name is in the
     /// frozen set, and project-authored otherwise. A new gate added tomorrow classifies correctly with no edit here.
     ///
-    /// THIS CLOSES THE GAP RM-79 WROTE DOWN AND COULD NOT CLOSE. <see cref="LicenceRule.ClassifyByPath"/> calls
-    /// everything outside <c>City/</c> upstream MIT, and § 10 has since put 62 files of its own under <c>Scripts/</c> --
-    /// 51 gates and registers under <c>Scripts/Editor/</c>, 7 cross-section profiles, 4 in the root. Stamped by path
-    /// they would each carry a notice crediting the upstream author with work they did not write, in a product sold
-    /// under a different licence. That is not a tidiness problem; it is a false attribution in both directions.
+    /// THIS CLOSES THE GAP RM-79 WROTE DOWN AND COULD NOT CLOSE. A naive path rule -- everything outside <c>City/</c>
+    /// upstream MIT -- would credit the upstream author with all 62 files § 10 has since put under <c>Scripts/</c>:
+    /// 51 gates and registers under <c>Scripts/Editor/</c>, 7 cross-section profiles, 4 in the root. Stamped that way
+    /// they would each carry a notice for work they did not write, in a product sold under a different licence -- a
+    /// false attribution in both directions. <see cref="LicenceRule.ClassifyByPath"/> asks THIS register instead, so
+    /// the default is proprietary and only a listed vendor filename is MIT.
     ///
     /// THE PARTITION IS CORROBORATED, NOT ASSERTED. RM-64's <c>InspectorConsistencyChecklist</c> was written many
     /// tasks earlier to answer an unrelated question -- which editor files does the author actually look at -- and its
