@@ -703,6 +703,8 @@ html[data-find="1"] .rail .grp>ol{display:block}
         <li><a class="lv4" href="#grade-ramp-climb"><span class="n"></span>A climb the gradient cannot achieve</a></li>
         <li><a class="lv3" href="#grade-ramp-line"><span class="n">6.9</span>The ramp's own centreline</a></li>
         <li><a class="lv3" href="#grade-recipe"><span class="n">6.10</span>Creating a flyover interchange</a></li>
+        <li><a class="lv4" href="#grade-recipe-control"><span class="n"></span>From the inspector: the Junction form control</a></li>
+        <li><a class="lv4" href="#grade-recipe-script"><span class="n"></span>Or, from a script: the same resolve, step by step</a></li>
         <li><a class="lv4" href="#grade-recipe-1"><span class="n"></span>Step 1 &mdash; find the crossing and decide which road rises</a></li>
         <li><a class="lv4" href="#grade-recipe-2"><span class="n"></span>Step 2 &mdash; check the climb is legal, and get the deck</a></li>
         <li><a class="lv4" href="#grade-recipe-3"><span class="n"></span>Step 3 &mdash; add the ramp that actually connects them</a></li>
@@ -901,7 +903,7 @@ that they fit. What actually stands on those pads is content you supply.</p>
 <h2 id="contents" data-title="Table of contents"><span class="sect">Road &amp; City Master</span>Table of contents</h2>
 </div>
 <!--BODY-->
-<p class="lede">Every page of the manual, and every heading inside it. <b>19</b> sections, <b>226</b> headings &mdash; each entry jumps straight to the page it names.</p>
+<p class="lede">Every page of the manual, and every heading inside it. <b>19</b> sections, <b>228</b> headings &mdash; each entry jumps straight to the page it names.</p>
 <div class="tocgrid">
   <section>
     <a class="top" href="#overview"><span class="n">1</span>Overview</a>
@@ -970,7 +972,7 @@ that they fit. What actually stands on those pads is content you supply.</p>
       <li><a href="#grade-recipe"><span class="n">6.10</span>Creating a flyover interchange</a></li>
       <li><a href="#grade-status"><span class="n">6.11</span>What is computed and what is deferred</a></li>
     </ol>
-    <a class="more" href="#grade">and 8 further headings on this page</a>
+    <a class="more" href="#grade">and 10 further headings on this page</a>
   </section>
   <section>
     <a class="top" href="#props"><span class="n">7</span>Prefabs, furniture and lamp posts</a>
@@ -3509,6 +3511,8 @@ carried into the geometry.</p>
 <li><a href="#grade-ramp-climb" class="sub"><span class="n"></span> A climb the gradient cannot achieve</a></li>
 <li><a href="#grade-ramp-line"><span class="n">6.9</span> The ramp's own centreline</a></li>
 <li><a href="#grade-recipe"><span class="n">6.10</span> Creating a flyover interchange</a></li>
+<li><a href="#grade-recipe-control" class="sub"><span class="n"></span> From the inspector: the Junction form control</a></li>
+<li><a href="#grade-recipe-script" class="sub"><span class="n"></span> Or, from a script: the same resolve, step by step</a></li>
 <li><a href="#grade-recipe-1" class="sub"><span class="n"></span> Step 1 &mdash; find the crossing and decide which road rises</a></li>
 <li><a href="#grade-recipe-2" class="sub"><span class="n"></span> Step 2 &mdash; check the climb is legal, and get the deck</a></li>
 <li><a href="#grade-recipe-3" class="sub"><span class="n"></span> Step 3 &mdash; add the ramp that actually connects them</a></li>
@@ -5327,8 +5331,8 @@ else
 <li><a href="#testing-fail"><span class="n">15.5</span> When a gate fails</a></li>
 </ul></div>
 <!--BODY-->
-<p class="lede">The tool proves itself. <b>96</b> gate classes assert <b>675</b> separate cases about geometry, data, licensing and determinism, and one menu command runs all of them and prints a single verdict. You do not need this page to build a road &mdash; you need it the day something looks wrong and you want to know whether the tool or the scene is at fault.</p>
-<div class="grid"><div class="card"><span class="k">Gates</span><span class="big">96</span><p>Discovered by reflection, not registered by hand.</p></div><div class="card"><span class="k">Cases</span><span class="big">675</span><p><code>Case&hellip;</code> methods inside them.</p></div><div class="card"><span class="k">Report tags</span><span class="big">70</span><p>Gates that print their own named report.</p></div><div class="card"><span class="k">Testing menu</span><span class="big">103</span><p>Of <b>125</b> menu items in total.</p></div></div>
+<p class="lede">The tool proves itself. <b>96</b> gate classes assert <b>676</b> separate cases about geometry, data, licensing and determinism, and one menu command runs all of them and prints a single verdict. You do not need this page to build a road &mdash; you need it the day something looks wrong and you want to know whether the tool or the scene is at fault.</p>
+<div class="grid"><div class="card"><span class="k">Gates</span><span class="big">96</span><p>Discovered by reflection, not registered by hand.</p></div><div class="card"><span class="k">Cases</span><span class="big">676</span><p><code>Case&hellip;</code> methods inside them.</p></div><div class="card"><span class="k">Report tags</span><span class="big">70</span><p>Gates that print their own named report.</p></div><div class="card"><span class="k">Testing menu</span><span class="big">103</span><p>Of <b>125</b> menu items in total.</p></div></div>
 <h3 id="testing-run" data-title="Running the whole suite"><span class="sect">15.1</span>Running the whole suite</h3>
 <p><b>Window&nbsp;&rsaquo; Road City Master&nbsp;&rsaquo; Testing&nbsp;&rsaquo; RUN ALL GATES (topic-boundary verification)</b> (<code>Scripts/Editor/RcmGateSuite.cs:25</code>). It runs in the Editor, on the open project, and prints one report to the console. Nothing is written to your scene and nothing is imported, so it is safe to run at any time &mdash; a handful of gates create and then delete a temporary asset, which is why the console shows a short burst of import activity while it works.</p>
 <p>The suite finds its gates by <b>reflection</b>: every <code>public static bool Run(out string report)</code> in the tool&rsquo;s own assemblies except the suite itself, sorted by full type name (<code>Scripts/Editor/RcmGateSuite.cs:112&ndash;140</code>). A gate you add needs no registration anywhere &mdash; write the method, and the next run includes it.</p>
@@ -5349,7 +5353,7 @@ RCMSUITE END</code></pre>
 <div class="warn"><p><b>In batch mode the suite also prints a breadcrumb.</b> Before each gate it logs <code>RCMSUITE discovered 96 gates</code> and then <code>RCMSUITE enter&nbsp; i/96&nbsp; &lt;full type name&gt;</code> (<code>RcmGateSuite.cs:62</code>, <code>73</code>). This exists because the report is accumulated and printed <em>after</em> the last gate returns: without the breadcrumb, one gate that never returns produces a completely silent log and there is no way to tell which one it was. If a batch run hangs, the last <code>enter</code> line names the culprit. The breadcrumb goes to the console only and never into the report, so the report stays byte-identical between runs.</p></div>
 <div class="stop"><p><b>Never leave a batch run unattended.</b> A hung gate spins a core indefinitely and holds over a gigabyte. Pair the launch with a hard deadline that kills the process, and after any kill delete <code>&lt;project&gt;/Temp/UnityLockfile</code> or the next launch cannot open the project.</p></div>
 <h3 id="testing-what" data-title="What a gate is, and what it is not"><span class="sect">15.4</span>What a gate is, and what it is not</h3>
-<p>A gate is a static method that answers one question about the tool with arithmetic. It takes no scene, opens no window and asks nothing of you. Inside, the work is split into <code>Case&hellip;</code> methods &mdash; <b>675</b> of them across the suite &mdash; each asserting one thing and appending its own sentence when it fails.</p>
+<p>A gate is a static method that answers one question about the tool with arithmetic. It takes no scene, opens no window and asks nothing of you. Inside, the work is split into <code>Case&hellip;</code> methods &mdash; <b>676</b> of them across the suite &mdash; each asserting one thing and appending its own sentence when it fails.</p>
 <div class="tablewrap"><table><thead><tr><th>Where</th><th>Gates</th><th>Proves</th></tr></thead><tbody><tr><td><code>City/Editor/</code></td><td><b>67</b></td><td>The city layer: blocks, zoning, settlement placement, scatter, streetscape, content resolution, the terrain linker, licensing and packaging.</td></tr><tr><td><code>Scripts/Editor/</code></td><td><b>29</b></td><td>The road layer: spline arithmetic, lane geometry, junction construction, bridges, tunnels, the preset format, material and shader inventory, and the inspector contract.</td></tr></tbody></table></div>
 <p><b>70</b> of the gates print a named report of their own &mdash; a prefix such as <code>RCMSTATUS</code> or <code>RCMDET</code> followed by their findings &mdash; which is what you read when you run that one gate on its own from the <a href="#menu-testing">Testing menu</a> rather than through the suite.</p>
 <div class="spec"><p><b>What a gate cannot tell you:</b> whether the road <em>looks</em> right. Gates prove arithmetic, refusals and data shape. A mesh that welds correctly and still looks wrong is a material, a normal or a scale problem, and no gate in the suite will report it. That is the honest boundary of this page.</p></div>
