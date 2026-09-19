@@ -206,11 +206,24 @@ namespace RoadCityMaster
             int reached = 0;
             reached += ReachabilityScan(RoadFile, RoadComponent, typeof(RoadEditor), failures);
             reached += ReachabilityScan(TerrainFile, TerrainComponent, typeof(TerrainEditor), failures);
-            Expect(reached == InspectorFieldRegistry.All().Count,
-                "reachable: " + reached + " of " + InspectorFieldRegistry.All().Count
-                + " registry fields are drawn; the rest are serialised but unreachable", failures);
+            // Scoped to the two components these two converted inspectors OWN, not the whole registry. The registry
+            // once held only Road and RoadTerrain, so "every registry field is drawn here" and "every field of the
+            // two scanned components is drawn here" were the same count. They are not any more: C-10's city rows and
+            // B-27's settlement-register node parameters seed InspectorFieldRegistry.All() so the CENSUS gate can
+            // require each one be documented -- but a RoadPowerLine field is drawn by RoadPowerLineEditor's own
+            // AllGroups call, a RoadIntersection field by RoadIntersectionEditor's, and a city-graph node parameter
+            // by the node UI, none of them by RoadEditor or TerrainEditor. Comparing this scan's reach against the
+            // whole of All() would demand RoadEditor draw a railway's cant, which is not its field to draw. The
+            // per-field duplicate and skip-array assertions inside ReachabilityScan still hold every Road/RoadTerrain
+            // field to being drawn exactly once, which is what this case exists to prove.
+            int owned = InspectorFieldRegistry.ForComponent(RoadComponent).Count
+                + InspectorFieldRegistry.ForComponent(TerrainComponent).Count;
+            Expect(reached == owned,
+                "reachable: " + reached + " of " + owned + " " + RoadComponent + "/" + TerrainComponent
+                + " fields are drawn by their inspectors; the rest are serialised but unreachable", failures);
             builder.Append("RCMLEGACYUI ").Append("every-field-reachable".PadRight(24))
-                   .Append("all ").Append(reached).Append(" registry fields are drawn, none twice\n");
+                   .Append("all ").Append(reached).Append(" ").Append(RoadComponent).Append("/")
+                   .Append(TerrainComponent).Append(" fields are drawn, none twice\n");
         }
 
 
@@ -492,9 +505,18 @@ namespace RoadCityMaster
                 if (!m.Success) { continue; }
                 scopes++;
                 string condition = m.Groups[1].Value;
-                Expect(condition.Contains("road.is"),
+                // A scope may be opened on this road's own state ("road.is..."), OR on one of the two named
+                // arm-confirm flags. B-14 requires the two irreversible action buttons -- apply-materials and
+                // reset-terrain-history -- to be VISIBLE-but-disabled until the author arms the toggle beside them,
+                // rather than swallowing the press or hiding the button; that arming flag is editor-local state, not
+                // road state, so it is admitted here by name. The build-state ban below still applies to EVERY scope
+                // unconditionally, so this allowance cannot be used to disable a control while the road builds.
+                bool armConfirm = condition.Contains("isApplyingMaterialsCheck")
+                    || condition.Contains("isResetingTH");
+                Expect(condition.Contains("road.is") || armConfirm,
                     "building: " + RoadFile + " line " + (i + 1) + " disables a control on '" + condition
-                    + "', which is not a state of the road this inspector is editing", failures);
+                    + "', which is neither a state of the road this inspector is editing nor a named arm-confirm flag",
+                    failures);
                 for (int b = 0; b < buildStateTokens.Length; b++)
                 {
                     Expect(!condition.Contains(buildStateTokens[b]),

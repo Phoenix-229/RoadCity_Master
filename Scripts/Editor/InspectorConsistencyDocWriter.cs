@@ -29,8 +29,7 @@ namespace RoadCityMaster
         /// FieldCensus.md. </summary>
         public static string ChecklistPath()
         {
-            return Path.Combine(Application.dataPath,
-                Path.Combine("RoadCityMaster", Path.Combine("Docs", "InspectorConsistency.md")));
+            return Path.Combine(DispositionDocWriter.DocsRoot(), "InspectorConsistency.md");
         }
 
         [MenuItem("Window/Road City Master/Documentation/Write the inspector consistency checklist")]

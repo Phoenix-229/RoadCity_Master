@@ -168,6 +168,8 @@ namespace RoadCityMaster
             SeedPlanNodes(f);
             SeedStreetAndLandNodes(f);
             SeedInfrastructureNodes(f);
+            SeedSettlementRegisterNodes(f);
+            SeedRiverAndDamNodes(f);
             SeedTerrainAndRuntimeNodes(f);
             SeedCanvasNodes(f);
             SeedElementPlacement(f);
@@ -869,23 +871,26 @@ namespace RoadCityMaster
                 + "the railway. It is only asked for when the line actually crosses a road.");
             Row(f, Rail, "settings.ohleMastMaterial", "Mast material", FieldGroup.WhatItLooksLike, FieldUnit.None,
                 FieldRange.None(),
-                "The material the OHLE mast and foundation wear. Left empty the line still builds and renders in Unity's "
-                + "missing-material pink.");
-            Row(f, Rail, "settings.ohleBracketMaterial", "Bracket material", FieldGroup.WhatItLooksLike, FieldUnit.None,
-                FieldRange.None(),
-                "The material the bracket and fittings wear. Left empty the line still builds and renders in Unity's "
-                + "missing-material pink.");
+                "The material the masts and their foundations wear. Galvanised steel gone chalky is the usual answer. "
+                + "The tool draws the steel and never makes a material for it, so this slot is yours; left empty the "
+                + "line still builds and that much of it renders in Unity's missing-material pink.");
+            Row(f, Rail, "settings.ohleBracketMaterial", "Bracket material", FieldGroup.WhatItLooksLike,
+                FieldUnit.None, FieldRange.None(),
+                "The material the registration arms, stays and fittings wear. A separate slot from the mast because "
+                + "fittings are bronze castings and porcelain insulators rather than galvanised tube, and at the top "
+                + "of a mast that difference is the part a viewer actually sees.");
             Row(f, Rail, "settings.ohleWireMaterial", "Wire material", FieldGroup.WhatItLooksLike, FieldUnit.None,
                 FieldRange.None(),
-                "The material the catenary, droppers and contact wire wear. A separate slot because wire is polished "
-                + "copper or alloy, which catches light completely differently from a steel mast.");
-            Row(f, Rail, "settings.ohleMastPrefab", "Mast prefab", FieldGroup.WhatItLooksLike, FieldUnit.None,
+                "The material the catenary, the droppers and the contact wire wear. A third slot because wire is drawn "
+                + "copper, polished bright along its underside where the pantograph rubs it -- which catches light "
+                + "nothing like a steel mast does.");
+            Row(f, Rail, "settings.ohleMastPrefab", "Mast prefab", FieldGroup.WhatItLooksLike, FieldUnit.Reference,
                 FieldRange.None(),
-                "Optional authored mast to replace the generated steel tube. If given, this prefab is placed at each "
-                + "mast position, scaled 1:1, oriented with +X facing the track. The wires are still generated.");
-            Row(f, Rail, "settings.ohleWirePrefab", "Wire prefab", FieldGroup.WhatItLooksLike, FieldUnit.None,
-                FieldRange.None(),
-                "Optional authored catenary wire prefab. Rare, but offered so authors can override the generated wire.");
+                "An optional mast of your own to stand instead of the generated steel tube. It is placed at each mast "
+                + "position with +X facing the track, and the wires are still generated and still hung from it. There "
+                + "is no matching wire prefab on purpose: a mast repeats unchanged down the line, but each span's wire "
+                + "hangs in the catenary that span's own length and tension give it, so a frozen wire mesh would not "
+                + "meet the masts it is tied to.");
         }
 
         /// <summary> B-27 / D-14's rows: a cross-country transmission run, placed as a polyline the author drags. It is
@@ -1086,6 +1091,193 @@ namespace RoadCityMaster
         {
             if (string.IsNullOrEmpty(prefix)) { return string.Empty; }
             return char.ToUpperInvariant(prefix[0]) + prefix.Substring(1);
+        }
+
+        /// <summary> B-27's settlement-register node kinds: the surface-rail, transit, metro (underground), port and
+        /// land-use nodes that read the fitted settlement table. Every parameter each kind declares needs a row here,
+        /// or CityGraphGate reports the setting has no unit, band or hover text -- one row per declared parameter. </summary>
+        private static void SeedSettlementRegisterNodes(List<FieldDescriptor> f)
+        {
+            // --- SettlementRail (D-6): does one settlement have a surface railway, and how much of it ---
+            Row(f, CityNodeKind.SettlementRail, "orderIndex", "Settlement order", FieldGroup.WhatItIs, FieldUnit.Index,
+                FieldRange.None(), "Which settlement order the presence curve is read for: 1 capital, 2 city, 3 town, "
+                + "4 village. Zero reads the order the settlement itself carries.");
+            Row(f, CityNodeKind.SettlementRail, "population", "Population", FieldGroup.WhatItIs, FieldUnit.None,
+                ZeroMeansOperatorDefault(), "The population the presence curve is asked about. Below about forty there "
+                + "is no railway without an explicit override.");
+            Row(f, CityNodeKind.SettlementRail, "continentKey", "Continent bucket", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "Which continent bucket to read, by key. Empty means the world curve, the fallback.");
+            Row(f, CityNodeKind.SettlementRail, "identity", "Settlement identity", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "The settlement's stable identity, the string the presence draw is keyed on -- not "
+                + "its display name, so a rename does not reshuffle the network.");
+
+            // --- Transit (D-8): bus stations and stops, and whether a stop and a rail station form one interchange ---
+            Row(f, CityNodeKind.Transit, "orderIndex", "Settlement order", FieldGroup.WhatItIs, FieldUnit.Index,
+                FieldRange.None(), "Which settlement order the bus-station count is read for: 1 capital, 2 city, 3 town, "
+                + "4 village.");
+            Row(f, CityNodeKind.Transit, "frontageMetres", "Stop frontage", FieldGroup.WhatItLooksLike, FieldUnit.Metres,
+                ZeroMeansOperatorDefault(), "The run of street frontage the bus stops are spaced along. Zero leaves the "
+                + "spacing to the operator.");
+            Row(f, CityNodeKind.Transit, "suburban", "Suburban spacing", FieldGroup.WhatItLooksLike, FieldUnit.None,
+                FieldRange.None(), "Off spaces bus stops at the urban nominal, on at the wider suburban one.");
+            Row(f, CityNodeKind.Transit, "railRunLengthMetres", "Rail run length", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The length of rail line the stations are spaced along. "
+                + "Zero leaves the rail-station spacing to the operator.");
+            Row(f, CityNodeKind.Transit, "railService", "Rail service", FieldGroup.WhatItLooksLike, FieldUnit.Index,
+                FieldRange.None(), "Which rail service spaces the stations: 0 metro (~1 km), 1 commuter (2-5 km), "
+                + "2 intercity.");
+            Row(f, CityNodeKind.Transit, "testInterchange", "Test interchange", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "On tests whether a bus stop and a rail station are one interchange, from the two "
+                + "figures below.");
+            Row(f, CityNodeKind.Transit, "busToRailMetres", "Bus-to-rail distance", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "How far a bus stop stands from a rail station, read only "
+                + "when the interchange test is on.");
+            Row(f, CityNodeKind.Transit, "walkBudgetMetres", "Interchange walk", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The walk inside which a stop and a station count as one "
+                + "interchange -- the standard 400 m five-minute walk by default.");
+
+            // --- Underground (D-9): does a settlement have a metro, and can a portal reach the ground it needs ---
+            Row(f, CityNodeKind.Underground, "orderIndex", "Settlement order", FieldGroup.WhatItIs, FieldUnit.Index,
+                FieldRange.None(), "Which settlement order the metro curve is read for: 1 capital, 2 city, 3 town, "
+                + "4 village.");
+            Row(f, CityNodeKind.Underground, "population", "Population", FieldGroup.WhatItIs, FieldUnit.None,
+                ZeroMeansOperatorDefault(), "The population the metro presence curve is asked about.");
+            Row(f, CityNodeKind.Underground, "continentKey", "Continent bucket", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "Which continent bucket to read, by key. Empty means the world curve.");
+            Row(f, CityNodeKind.Underground, "identity", "Settlement identity", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "The settlement's stable identity, keying the metro draw exactly as surface rail is "
+                + "keyed.");
+            Row(f, CityNodeKind.Underground, "surfaceSlopeFraction", "Surface grade", FieldGroup.WhatItDoesToTheWorld,
+                FieldUnit.Fraction, FieldRange.None(), "The steepest grade a surface road would climb here, as rise "
+                + "over run, read against the road class's ruling gradient.");
+            Row(f, CityNodeKind.Underground, "roadMaxGradientFraction", "Road ruling gradient",
+                FieldGroup.WhatItDoesToTheWorld, FieldUnit.Fraction, ZeroMeansOperatorDefault(), "The road class's "
+                + "ruling gradient, as rise over run. Zero leaves relief unjudged.");
+            Row(f, CityNodeKind.Underground, "waterGapMetres", "Water gap", FieldGroup.WhatItDoesToTheWorld,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The width of a water crossing on the route.");
+            Row(f, CityNodeKind.Underground, "surfaceMaxCrossingMetres", "Surface span limit",
+                FieldGroup.WhatItDoesToTheWorld, FieldUnit.Metres, ZeroMeansOperatorDefault(), "The longest structure "
+                + "the surface network can span. A water gap wider than this forces the crossing underground.");
+            Row(f, CityNodeKind.Underground, "portalOnWater", "Portal on water", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "Whether the metro's portal falls in open water, which needs the underwater case.");
+            Row(f, CityNodeKind.Underground, "underwaterCaseAvailable", "Underwater case", FieldGroup.WhatItIs,
+                FieldUnit.None, FieldRange.None(), "Whether the underwater case is available on this bake.");
+            Row(f, CityNodeKind.Underground, "portalGroundValid", "Portal ground valid", FieldGroup.WhatItIs,
+                FieldUnit.None, FieldRange.None(), "Whether the portal site returns ground at all. Off refuses the "
+                + "portal -- there is nothing to found it on.");
+
+            // --- Port (D-11): which port family member, and whether the site meets its water or land needs ---
+            Row(f, CityNodeKind.Port, "kind", "Port kind", FieldGroup.WhatItIs, FieldUnit.Index, FieldRange.None(),
+                "Which member of the port family to test: 0 a water port decided by depth, 1 a dry port needing rail "
+                + "and road.");
+            Row(f, CityNodeKind.Port, "navigableDepthMetres", "Navigable depth", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "For a water port, the navigable depth read at the quay "
+                + "line. The depth alone decides a water port.");
+            Row(f, CityNodeKind.Port, "waterReachable", "Water reachable", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "For a water port, whether a sea, lake or navigable river was reachable from the "
+                + "site.");
+            Row(f, CityNodeKind.Port, "railPresent", "Rail present", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "For a dry port or shipment yard, whether a rail spur reaches the site.");
+            Row(f, CityNodeKind.Port, "trunkRoadPresent", "Trunk road present", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "For a dry port, whether a trunk road reaches the site to clear the containers it "
+                + "lands.");
+
+            // --- LandUseShares: which settlement order and continent to read the land-use composition for ---
+            Row(f, CityNodeKind.LandUseShares, "orderIndex", "Settlement order", FieldGroup.WhatItIs, FieldUnit.Index,
+                FieldRange.None(), "Which settlement order to read: 1 capital, 2 city, 3 town, 4 village. Zero reads "
+                + "the order the settlement carries.");
+            Row(f, CityNodeKind.LandUseShares, "continentKey", "Continent bucket", FieldGroup.WhatItIs, FieldUnit.None,
+                FieldRange.None(), "Which continent bucket to read, by key. Empty reads the world composition.");
+        }
+
+        /// <summary> B-27's river-edge and dam node kinds: the bank treatment along a river, the crossing that spans it,
+        /// and the gravity dam that impounds it. One row per declared parameter, so each carries its unit, band and
+        /// hover sentence in the inspector rather than appearing as a bare, undocumented field. </summary>
+        private static void SeedRiverAndDamNodes(List<FieldDescriptor> f)
+        {
+            // --- RiverBank: how the settlement edge meets the water on one side ---
+            Row(f, CityNodeKind.RiverBank, "waterDepthMetres", "Water depth", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The design water depth at this station. The bank rises a "
+                + "freeboard above it.");
+            Row(f, CityNodeKind.RiverBank, "availableFrontageMetres", "Available frontage", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "How much horizontal room the settlement leaves for the "
+                + "bank on this side. A slope that does not fit is escalated to a wall.");
+            Row(f, CityNodeKind.RiverBank, "preferredTreatment", "Preferred treatment", FieldGroup.WhatItLooksLike,
+                FieldUnit.Index, FieldRange.None(), "The treatment to try first: 0 grassed earth, 1 armoured, 2 a "
+                + "retaining wall outright.");
+            Row(f, CityNodeKind.RiverBank, "railingSpacingMetres", "Railing spacing", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The spacing of the instanced railing posts along the "
+                + "top.");
+            Row(f, CityNodeKind.RiverBank, "topLengthMetres", "Bank-top length", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The length of bank top to rail. Zero rails nothing.");
+            Row(f, CityNodeKind.RiverBank, "pavementOnThisSide", "Pavement this side", FieldGroup.WhatItLooksLike,
+                FieldUnit.None, FieldRange.None(), "Whether this side carries the pavement. The railing is placed on "
+                + "the pavement side only.");
+
+            // --- RiverCrossing: the bridge that carries a road over the river ---
+            Row(f, CityNodeKind.RiverCrossing, "spanMetres", "Crossing span", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The crossing span. A span outside the chosen type's "
+                + "authored range is refused.");
+            Row(f, CityNodeKind.RiverCrossing, "bridgeType", "Bridge type", FieldGroup.WhatItLooksLike, FieldUnit.Index,
+                FieldRange.None(), "Which bridge type: -1 selects the simplest shipped type the span fits, 0 beam, "
+                + "1 arch, and so on.");
+            Row(f, CityNodeKind.RiverCrossing, "wettedCentreMetres", "Wetted centre", FieldGroup.WhatItDoesToTheWorld,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "Where the river's wetted band is centred along the span, "
+                + "measured from the start.");
+            Row(f, CityNodeKind.RiverCrossing, "wettedWidthMetres", "Wetted width", FieldGroup.WhatItDoesToTheWorld,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "How wide the river runs under the crossing. A support "
+                + "inside this band lands in water.");
+
+            // --- Dam: the gravity dam's placement, section, spillway, outlet and flood-fill controls ---
+            Row(f, CityNodeKind.Dam, "centreX", "Centre X", FieldGroup.WhatItIs, FieldUnit.Metres, FieldRange.None(),
+                "The dam centre's world X, where the crest line is centred.");
+            Row(f, CityNodeKind.Dam, "centreZ", "Centre Z", FieldGroup.WhatItIs, FieldUnit.Metres, FieldRange.None(),
+                "The dam centre's world Z, paired with Centre X to place the crest line's midpoint on the valley the "
+                + "section is read across.");
+            Row(f, CityNodeKind.Dam, "axisHeadingDeg", "Axis heading", FieldGroup.WhatItIs, FieldUnit.Degrees,
+                FieldRange.None(), "The compass heading the crest runs along (0 = +Z, 90 = +X).");
+            Row(f, CityNodeKind.Dam, "upstreamHeadingDeg", "Upstream heading", FieldGroup.WhatItIs, FieldUnit.Degrees,
+                FieldRange.None(), "The heading towards the reservoir. The fill floods this side of the crest only.");
+            Row(f, CityNodeKind.Dam, "crestLevelMetres", "Crest level", FieldGroup.WhatItIs, FieldUnit.Metres,
+                FieldRange.None(), "The top of the dam as a world height. The reservoir is held a freeboard below it.");
+            Row(f, CityNodeKind.Dam, "freeboardMetres", "Freeboard", FieldGroup.WhatItLooksLike, FieldUnit.Metres,
+                FieldRange.None(), "The gap left between full reservoir and crest. Below 1.5 m the body is refused.");
+            Row(f, CityNodeKind.Dam, "crestLengthMetres", "Crest length", FieldGroup.WhatItLooksLike, FieldUnit.Metres,
+                FieldRange.None(), "How far the crest runs across the valley, read against the abutments the section "
+                + "finds.");
+            Row(f, CityNodeKind.Dam, "crestWidthMetres", "Crest width", FieldGroup.WhatItLooksLike, FieldUnit.Metres,
+                FieldRange.None(), "The crest's front-to-back width, which sets the top of the gravity section and must "
+                + "be wide enough to carry the crest road and footways.");
+            Row(f, CityNodeKind.Dam, "upstreamRunPerRise", "Upstream batter", FieldGroup.WhatItLooksLike,
+                FieldUnit.Fraction, FieldRange.None(), "The upstream face batter as run per rise. A gravity dam's "
+                + "upstream face is near-vertical.");
+            Row(f, CityNodeKind.Dam, "downstreamRunPerRise", "Downstream batter", FieldGroup.WhatItLooksLike,
+                FieldUnit.Fraction, FieldRange.None(), "The downstream face batter as run per rise. About 0.75 for a "
+                + "concrete gravity dam.");
+            Row(f, CityNodeKind.Dam, "spillwayType", "Spillway type", FieldGroup.WhatItLooksLike, FieldUnit.Index,
+                FieldRange.None(), "Which spillway form: 0 ogee overflow, 1 chute, 2 broad-crested. Sets the weir "
+                + "coefficient.");
+            Row(f, CityNodeKind.Dam, "spillwayCrestLevelMetres", "Spillway crest", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, FieldRange.None(), "The spillway crest level as a world height. At or above the "
+                + "reservoir it passes nothing.");
+            Row(f, CityNodeKind.Dam, "spillwayWidthMetres", "Spillway width", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The spillway's clear width, which sets how much flood "
+                + "the weir passes: discharge rises directly with it in Q = C.L.H^1.5.");
+            Row(f, CityNodeKind.Dam, "outletInvertLevelMetres", "Outlet invert", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, FieldRange.None(), "The low-level outlet's invert as a world height.");
+            Row(f, CityNodeKind.Dam, "outletBoreDiameterMetres", "Outlet bore", FieldGroup.WhatItLooksLike,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The outlet bore's diameter. Zero means no outlet works.");
+            Row(f, CityNodeKind.Dam, "downstreamWaterDepthMetres", "Tailwater depth", FieldGroup.WhatItDoesToTheWorld,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The river's natural depth below the dam, added to the "
+                + "toe ground for the tailwater.");
+            Row(f, CityNodeKind.Dam, "cellSizeMetres", "Flood-fill cell", FieldGroup.WhatItDoesToTheWorld,
+                FieldUnit.Metres, ZeroMeansOperatorDefault(), "The flood-fill resolution. Smaller resolves the shore "
+                + "more finely, for more samples.");
+            Row(f, CityNodeKind.Dam, "maxFloodCells", "Flood-fill budget", FieldGroup.WhatItDoesToTheWorld,
+                FieldUnit.None, ZeroMeansOperatorDefault(), "The flood-fill cell budget. Hitting it is reported -- the "
+                + "reservoir extent becomes a lower bound.");
+            Row(f, CityNodeKind.Dam, "valleySamples", "Valley samples", FieldGroup.WhatItDoesToTheWorld, FieldUnit.None,
+                ZeroMeansOperatorDefault(), "How many points the valley section is read at across the crest.");
         }
     }
 }

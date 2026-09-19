@@ -587,6 +587,29 @@ namespace RoadCityMaster
                 + "gradeModNegative is an author-editable companion field, like gradeMod.",
                 null));
 
+            r.Add(new LegacyMathRow("Scripts/RoadIntersection.cs", "interchange vertical clearance",
+                "the headroom the raised road keeps over the road beneath it, which sets how far it must climb and "
+                + "therefore how much approach length each side needs",
+                new string[] { "5.1f" },
+                MathRole.Geometry, MathDisposition.AuthoredKeep,
+                "interchangeVerticalClearanceMetres = 5.1 m, the default clearance a grade separation leaves over the "
+                + "carriageway below. AASHTO's minimum is 16.5 ft (5.03 m); the extra 0.07 m is the resurfacing and "
+                + "signage-mounting allowance a design carries so a repaved lower road does not eat the clearance.",
+                "it is an author-editable field, so it is AuthoredKeep rather than Sourced -- the 5.1 default rests on "
+                + "a real design standard but the author may raise it for a route that carries oversize loads.",
+                null));
+
+            r.Add(new LegacyMathRow("Scripts/RoadIntersection.cs", "degenerate-leg guard",
+                "the squared length below which one of the two roads meeting at a corner is treated as having no "
+                + "direction, so the angle between them returns a right angle instead of normalising a zero vector",
+                new string[] { "0.000001f" },
+                MathRole.NumericalTolerance, MathDisposition.AuthoredKeep,
+                "1e-6 m^2 -- a millimetre squared -- compared against each leg's sqrMagnitude before the angle is "
+                + "taken; below it the leg is a point, not a direction, and the corner falls back to 90 degrees.",
+                "none: an epsilon guarding an acos against a zero-length vector is a numerical floor, not a road "
+                + "dimension, so no design standard governs it and the sweep only needs it named.",
+                null));
+
             r.Add(new LegacyMathRow("Scripts/Road.cs", "editor timing and gizmo colours",
                 "how often the scene-view camera check runs, and the transparency of node gizmos",
                 new string[] { "0.015f", "0.75f" },

@@ -177,7 +177,7 @@ namespace RoadCityMaster.City
                 CityInstanceFamily.TransmissionTower, CityInstanceFamily.TransmissionSpan,
                 CityInstanceFamily.DistributionPole, CityInstanceFamily.OverheadLineSpan,
                 CityInstanceFamily.RailSleeper, CityInstanceFamily.RailingPost,
-                CityInstanceFamily.StreetFurniture
+                CityInstanceFamily.StreetFurniture, CityInstanceFamily.OHLEMast
             };
             for (int i = 0; i < families.Length; i++)
             {

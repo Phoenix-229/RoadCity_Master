@@ -263,6 +263,18 @@ namespace RoadCityMaster.City
 
                 Vector3 at = onRoad + right * (sign * lateral);
                 float groundY = ground.SampleHeight(at.x, at.z);
+                // A reader returns NaN or an infinity for a point it has no loaded terrain under -- past the edge of
+                // the world, or over a hole. Seating a pole on that height would put its butt at NaN, which is exactly
+                // the pole that then hangs in the air or sinks out of sight, and the NaN carries into every conductor
+                // strung from it. So the pole at an unreadable point is skipped and named, the same refusal
+                // GroundSeating makes, rather than placed at a height that is not a number.
+                if (float.IsNaN(groundY) || float.IsInfinity(groundY))
+                {
+                    plan.refusals.Add("the pole at " + stations[i].ToString("0.0")
+                        + " m stands over ground the terrain could not read, so it was left out rather than placed at"
+                        + " an unreadable height; move the run onto loaded terrain.");
+                    continue;
+                }
 
                 RoadPowerLinePole pole = new RoadPowerLinePole();
                 pole.stationMetres = stations[i];

@@ -63,6 +63,13 @@ namespace RoadCityMaster.City.Editor
         private const string BedElement = "bed.rail.";
         private const string SteelElement = "steel.rail.";
         private const string PanelElement = "panel.rail.";
+
+        /// <summary> The two overhead-line element ids (D-7): a mast/bracket piece and a wire piece. They hang under the
+        /// same run holder as the track, so <see cref="Clear"/> takes them with the rest, and they own their meshes for
+        /// the same reason a rail piece does -- every one is a unique swept shape, so nothing is shared and nothing is
+        /// cached. </summary>
+        private const string MastElement = "mast.rail.";
+        private const string WireElement = "wire.rail.";
         #endregion
 
 
@@ -82,6 +89,19 @@ namespace RoadCityMaster.City.Editor
         /// two-track line be built on a formation that was checked as one. </summary>
         public static string Build(RailAlignment line, RailAlignmentPlan plan)
         {
+            return Build(line, plan, null);
+        }
+
+        /// <summary> Build the track and, where one was planned, the overhead line over it, in one undo step.
+        ///
+        /// The overhead plan is taken AS GIVEN, exactly as the alignment plan is: the inspector planned it against the
+        /// same ground the author was shown and disabled nothing it could build, so a builder that re-planned the wire
+        /// would disagree with the figures on screen. A null or unbuildable overhead plan is not a failure -- an
+        /// unelectrified line has none, and a line whose class refused the wire has one with fewer than two masts -- so
+        /// the track still builds and the sentence simply does not mention masts. The masts and wires hang under the
+        /// SAME run holder as the track, so one <see cref="Clear"/> takes the whole electrified railway. </summary>
+        public static string Build(RailAlignment line, RailAlignmentPlan plan, RailOverheadPlan overhead)
+        {
             if (line == null) { return "Nothing was built: the builder was handed no railway."; }
             if (plan == null) { return "Nothing was built: the line has not been planned yet."; }
             if (!plan.Buildable) { return NotBuildableLine(plan); }
@@ -89,6 +109,7 @@ namespace RoadCityMaster.City.Editor
             RailAlignmentSettings s = line.settings != null ? line.settings : new RailAlignmentSettings();
             RailTrackClass track = s.track != null ? s.track : RailTrackClass.Default();
             RailFormationClass form = s.formation != null ? s.formation : RailFormationClass.Default();
+            RailOverheadClass ohle = s.overhead != null ? s.overhead : RailOverheadClass.Default();
             int tracks = plan.trackCount > 0 ? plan.trackCount : 1;
 
             Undo.IncrementCurrentGroup();
@@ -108,11 +129,67 @@ namespace RoadCityMaster.City.Editor
             int pieces = BuildPieces(plan, form, track, tracks, holder, line.name, bedMaterials, steelMaterials);
             int panels = BuildPanels(plan, form, track, tracks, holder, line.name, panelMaterials);
 
+            bool wired = overhead != null && overhead.Buildable;
+            int masts = 0;
+            int wires = 0;
+            if (wired)
+            {
+                // A mast piece is two submeshes -- steel then bracket; a wire piece is one material in both slots, as
+                // the rails are, for the same short-array reason.
+                Material[] mastMaterials = new Material[] { s.ohleMastMaterial, s.ohleBracketMaterial };
+                Material[] wireMaterials = new Material[] { s.ohleWireMaterial, s.ohleWireMaterial };
+                masts = BuildMastPieces(overhead, plan, ohle, holder, line.name, mastMaterials);
+                wires = BuildWirePieces(overhead, plan, ohle, holder, line.name, wireMaterials);
+            }
+
             Undo.SetCurrentGroupName(UndoLabel);
             Undo.CollapseUndoOperations(undoGroup);
 
-            return BuiltLine(plan, pieces, panels, line.name) + MissingMaterialsNote(s, panels)
-                   + BatchingNote(pieces * 2 + panels + 1);
+            int objects = pieces * 2 + panels + masts + wires + 1;
+            return BuiltLine(plan, pieces, panels, line.name) + OverheadBuiltNote(overhead, masts, wires)
+                   + MissingMaterialsNote(s, panels) + OverheadMaterialsNote(s, wired)
+                   + BatchingNote(objects);
+        }
+
+        /// <summary> Sweep the overhead masts into pieces of <see cref="RailOverheadMeshes.MastsPerPiece"/>, one object
+        /// each. Placed at the piece's own origin -- the first mast's base -- so a wire ten kilometres out keeps small
+        /// local coordinates. A null mesh is skipped, not refused, the same as a degenerate track piece. </summary>
+        private static int BuildMastPieces(RailOverheadPlan overhead, RailAlignmentPlan plan, RailOverheadClass ohle,
+            Transform holder, string runName, Material[] materials)
+        {
+            int count = RailOverheadMeshes.MastPieceCount(overhead.masts.Count);
+            int built = 0;
+            for (int piece = 0; piece < count; piece++)
+            {
+                int from = piece * RailOverheadMeshes.MastsPerPiece;
+                Vector3 origin;
+                Mesh mesh = RailOverheadMeshes.BuildMastPiece(overhead, plan.samples, ohle, from,
+                    RailOverheadMeshes.MastsPerPiece, out origin);
+                if (mesh == null) { continue; }
+                Make(Named(MastElement, runName, piece), holder, origin, Quaternion.identity, mesh, materials);
+                built++;
+            }
+            return built;
+        }
+
+        /// <summary> Sweep the overhead wires into pieces of <see cref="RailOverheadMeshes.SpansPerPiece"/> spans, one
+        /// object each. </summary>
+        private static int BuildWirePieces(RailOverheadPlan overhead, RailAlignmentPlan plan, RailOverheadClass ohle,
+            Transform holder, string runName, Material[] materials)
+        {
+            int count = RailOverheadMeshes.WirePieceCount(overhead.spans.Count);
+            int built = 0;
+            for (int piece = 0; piece < count; piece++)
+            {
+                int from = piece * RailOverheadMeshes.SpansPerPiece;
+                Vector3 origin;
+                Mesh mesh = RailOverheadMeshes.BuildWirePiece(overhead, plan.samples, ohle, from,
+                    RailOverheadMeshes.SpansPerPiece, out origin);
+                if (mesh == null) { continue; }
+                Make(Named(WireElement, runName, piece), holder, origin, Quaternion.identity, mesh, materials);
+                built++;
+            }
+            return built;
         }
 
         /// <summary> Sweep the run into pieces, two objects each.
@@ -306,7 +383,9 @@ namespace RoadCityMaster.City.Editor
             if (!CityHierarchy.TryParseName(name, out element)) { return false; }
             return element.StartsWith(BedElement, StringComparison.Ordinal)
                    || element.StartsWith(SteelElement, StringComparison.Ordinal)
-                   || element.StartsWith(PanelElement, StringComparison.Ordinal);
+                   || element.StartsWith(PanelElement, StringComparison.Ordinal)
+                   || element.StartsWith(MastElement, StringComparison.Ordinal)
+                   || element.StartsWith(WireElement, StringComparison.Ordinal);
         }
         #endregion
 
@@ -384,6 +463,39 @@ namespace RoadCityMaster.City.Editor
             return " The " + string.Join(" and the ", bare.ToArray()) + (bare.Count == 1 ? " slot is" : " slots are")
                    + " empty, so that much of the line renders in Unity's missing-material pink. The geometry is "
                    + "right; only the material is absent.";
+        }
+
+        /// <summary> What the overhead build added, appended to the track sentence. Empty when nothing was wired, so an
+        /// unelectrified line's sentence is exactly what it was before D-7 -- the note only appears where there is a
+        /// wire to describe. Says the mast and wire piece counts rather than the mast count, because that is what an
+        /// author checks the hierarchy against; the plan's own summary already gives the mast count and every measured
+        /// figure above this line. Pure and public so D-16 asserts the wording without a scene. </summary>
+        public static string OverheadBuiltNote(RailOverheadPlan overhead, int mastPieces, int wirePieces)
+        {
+            if (overhead == null || !overhead.Buildable || (mastPieces == 0 && wirePieces == 0))
+            {
+                return string.Empty;
+            }
+            return " Over it, " + Countable(overhead.masts.Count, "mast", "masts") + " and their wires were strung in "
+                   + Countable(mastPieces + wirePieces, "piece", "pieces") + ".";
+        }
+
+        /// <summary> Which overhead material slots were left empty. Kept separate from the track's
+        /// <see cref="MissingMaterialsNote"/> because the two are filled on different foldouts and an author reads the
+        /// wire's pink and the ballast's pink as two different omissions. Silent unless a wire was actually built, so a
+        /// line that carries no overhead is never told to fill a mast material. </summary>
+        public static string OverheadMaterialsNote(RailAlignmentSettings settings, bool wired)
+        {
+            if (!wired) { return string.Empty; }
+            RailAlignmentSettings s = settings != null ? settings : new RailAlignmentSettings();
+            List<string> bare = new List<string>();
+            if (s.ohleMastMaterial == null) { bare.Add("mast"); }
+            if (s.ohleBracketMaterial == null) { bare.Add("bracket"); }
+            if (s.ohleWireMaterial == null) { bare.Add("wire"); }
+            if (bare.Count == 0) { return string.Empty; }
+
+            return " The overhead " + string.Join(" and ", bare.ToArray()) + (bare.Count == 1 ? " slot is" : " slots are")
+                   + " empty, so that equipment renders in the missing-material pink until a material is assigned.";
         }
 
         /// <summary> The one performance sentence, and the opposite of the pole line's.

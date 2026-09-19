@@ -954,7 +954,9 @@ namespace RoadCityMaster
 
             EditorConstructionStartTime = Time.realtimeSinceStartup;
             editorTitleString = "Updating " + transform.name + "...";
-            System.GC.Collect();
+            // No forced System.GC.Collect() at the start of a build: it blocks the main thread for a full collection
+            // on every edit, which is a large part of the editor's "Hold On" freeze while working on roads. The
+            // incremental collector reclaims on its own schedule. (Legacy imported pattern, modernised.)
 
             if (isSavingTerrainHistoryOnDisk)
             {
@@ -1438,7 +1440,8 @@ namespace RoadCityMaster
                         EditorTTDList[i] = null;
                     }
                     EditorTTDList = null;
-                    System.GC.Collect();
+                    // Nulling the entries and the list frees the temp terrain data; a forced collection here only
+                    // added a blocking main-thread stall mid-build. Removed. (Legacy imported pattern, modernised.)
                 }
                 RootUtils.EndProfiling(this);
             }
@@ -1482,7 +1485,11 @@ namespace RoadCityMaster
 
                 EditorTTDList.Clear();
                 EditorTTDList = null;
-                System.GC.Collect();
+                // Clearing and nulling the list frees the temp terrain data; the collector reclaims it on its own
+                // schedule. A forced System.GC.Collect() here fired on every road build and blocked the main thread
+                // for the length of a full collection, in the middle of an interactive edit -- a large contributor to
+                // the editor's "Hold On" freeze while working on roads. Removed so the build step stays bounded and
+                // the incremental GC does the reclaim without a stall. (Legacy imported pattern, modernised.)
             }
             editorProgress = 60;
 

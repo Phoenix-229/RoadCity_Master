@@ -66,6 +66,7 @@ namespace RoadCityMaster.City.Editor
             CaseOneCatenarySurface(failures, output);
             CaseCachedTowerMesh(failures, output);
             CaseCachedPoleMesh(failures, output);
+            CaseOverheadMesh(failures, output);
             CaseFittedTransitRow(failures, output);
             CaseWaterRejection(failures, output);
             CaseSettlementRefusal(failures, output);
@@ -141,6 +142,97 @@ namespace RoadCityMaster.City.Editor
             output.Append(Prefix).AppendLine(" equal pole parameters reuse one cached mesh");
         }
 
+        /// <summary> D-7's scene half: the overhead line builds a mast and its wires as real geometry, the mast is
+        /// SEATED (its foundation runs below the ground it stands on and its head rises above the rail head), and both
+        /// pieces are recognised as the builder's own so a rebuild clears them rather than leaking a kilometre of tube.
+        ///
+        /// The seating is checked in the mesh's own local space, which is exactly where a floating or buried mast would
+        /// show: the piece origin is the mast's ground point, so a buried foundation is a vertex below zero and the mast
+        /// head is a vertex well above it. A mesh whose lowest vertex were at or above zero would be a mast resting on
+        /// the surface -- the defect B-13 forbids for a pole, asserted here for a mast. </summary>
+        private static void CaseOverheadMesh(List<string> failures, StringBuilder output)
+        {
+            List<RailAlignmentSample> samples = new List<RailAlignmentSample>();
+            RailOverheadPlan plan = new RailOverheadPlan();
+            RailOverheadClass ohle = RailOverheadClass.Default();
+            const float railHeadY = 100f;
+            const float groundY = 99f;
+            for (int i = 0; i < 3; i++)
+            {
+                float station = i * 30f;
+                RailAlignmentSample sample = new RailAlignmentSample();
+                sample.stationMetres = station;
+                sample.position = new Vector3(0f, railHeadY, station);
+                sample.tangent = new Vector3(0f, 0f, 1f);
+                sample.radiusMetres = double.PositiveInfinity;
+                sample.groundHeightMetres = groundY;
+                samples.Add(sample);
+
+                RailOverheadMast mast = new RailOverheadMast();
+                mast.stationMetres = station;
+                mast.railHeadWorldY = railHeadY;
+                mast.railHeadAboveGroundMetres = railHeadY - groundY;
+                mast.staggerSign = RailOverheadClass.StaggerSignAt(i);
+                mast.staggerMetres = ohle.staggerMetres;
+                mast.radiusMetres = double.PositiveInfinity;
+                mast.basePoint = new Vector3(-2f * mast.staggerSign, groundY, station);
+                mast.contactWireHeightMetres = 5.3f;
+                mast.messengerHeightMetres = 5.3f + ohle.systemHeightMetres;
+                plan.masts.Add(mast);
+            }
+            for (int i = 0; i + 1 < plan.masts.Count; i++)
+            {
+                RailOverheadSpan span = new RailOverheadSpan();
+                span.fromMastIndex = i;
+                span.toMastIndex = i + 1;
+                span.spanMetres = 30f;
+                span.messenger = TransmissionLine.Solve(30f, plan.masts[i].messengerHeightMetres,
+                    plan.masts[i + 1].messengerHeightMetres, ohle.messengerSagRatio);
+                plan.spans.Add(span);
+            }
+
+            Vector3 mastOrigin;
+            Mesh mastMesh = RailOverheadMeshes.BuildMastPiece(plan, samples, ohle, 0,
+                RailOverheadMeshes.MastsPerPiece, out mastOrigin);
+            Vector3 wireOrigin;
+            Mesh wireMesh = RailOverheadMeshes.BuildWirePiece(plan, samples, ohle, 0,
+                RailOverheadMeshes.SpansPerPiece, out wireOrigin);
+
+            Expect(mastMesh != null && mastMesh.vertexCount > 0, "D-7: no mast geometry was built", failures);
+            Expect(wireMesh != null && wireMesh.vertexCount > 0, "D-7: no wire geometry was built", failures);
+            if (mastMesh != null && mastMesh.vertexCount > 0)
+            {
+                float lowest = float.PositiveInfinity;
+                float highest = float.NegativeInfinity;
+                Vector3[] v = mastMesh.vertices;
+                for (int i = 0; i < v.Length; i++)
+                {
+                    if (v[i].y < lowest) { lowest = v[i].y; }
+                    if (v[i].y > highest) { highest = v[i].y; }
+                }
+                Expect(lowest < 0f, "D-7: the mast foundation does not run below the ground it stands on -- it floats",
+                    failures);
+                Expect(highest > (railHeadY - groundY),
+                    "D-7: the mast does not rise above the rail head, so it holds no wire", failures);
+            }
+
+            string mastName = CityHierarchy.NameFor(GeneratedKind.Rail, "mast.rail.probe", 0);
+            string wireName = CityHierarchy.NameFor(GeneratedKind.Rail, "wire.rail.probe", 0);
+            string runName = CityHierarchy.NameFor(GeneratedKind.Rail, "run.rail.probe", 0);
+            Expect(RailAlignmentBuilder.OwnsItsMesh(mastName) && RailAlignmentBuilder.OwnsItsMesh(wireName),
+                "D-7: a mast or wire piece is not recognised as the builder's own, so a rebuild would leak its mesh",
+                failures);
+            Expect(!RailAlignmentBuilder.OwnsItsMesh(runName),
+                "D-7: the run holder was wrongly claimed to own a mesh", failures);
+            Expect(RailAlignmentBuilder.OverheadBuiltNote(plan, 1, 1).Contains("mast")
+                   && RailAlignmentBuilder.OverheadBuiltNote(null, 0, 0).Length == 0,
+                "D-7: the overhead build note does not describe a wired line, or speaks for an unwired one", failures);
+
+            if (mastMesh != null) { UnityEngine.Object.DestroyImmediate(mastMesh); }
+            if (wireMesh != null) { UnityEngine.Object.DestroyImmediate(wireMesh); }
+            output.Append(Prefix).AppendLine(" the overhead line builds a seated mast and its wires, owned for cleanup");
+        }
+
         /// <summary> D-9. Rail and metro PRESENCE at a settlement is a fitted-row lookup, not a literal: a table
         /// authored from a null catalogue carries no rail or metro rows, so the presence question answers "no" because
         /// the ROW is absent -- proving the answer follows the data and is never hard-coded to yes. </summary>
@@ -214,8 +306,8 @@ namespace RoadCityMaster.City.Editor
         private static void CaseInstanceBudgets(List<string> failures, StringBuilder output)
         {
             List<CityInstanceCeilingVerdict> ceilings = CityInstanceBudget.AllCeilings();
-            Expect(ceilings.Count == 7,
-                "D-15: expected one per-chunk ceiling for each of the 7 generated families; got " + ceilings.Count,
+            Expect(ceilings.Count == 8,
+                "D-15: expected one per-chunk ceiling for each of the 8 generated families; got " + ceilings.Count,
                 failures);
             for (int i = 0; i < ceilings.Count; i++)
             {

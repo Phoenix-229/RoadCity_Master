@@ -828,6 +828,11 @@ namespace RoadCityMaster.City
             Vector3 basePoint = sample.position - right * (float)(lateral * staggerSign);
             float groundY = ground != null ? ground.SampleHeight(basePoint.x, basePoint.z)
                 : sample.groundHeightMetres;
+            // A reader hands back NaN or an infinity for a point it has no loaded terrain under. Left alone that
+            // becomes the mast's base Y and the mast hangs or sinks, with the not-a-number carrying up into the
+            // contact wire strung from it. The centreline height the sample already carries is right to within the
+            // cross-fall, so an unreadable offset point falls back to it rather than to a height that is not a number.
+            if (float.IsNaN(groundY) || float.IsInfinity(groundY)) { groundY = (float)sample.groundHeightMetres; }
             basePoint.y = groundY;
             mast.basePoint = basePoint;
             mast.railHeadAboveGroundMetres = sample.position.y - groundY;
@@ -869,30 +874,20 @@ namespace RoadCityMaster.City
             plan.masts.Add(mast);
         }
 
-        /// <summary> The electrical clearance the wire keeps below a structure. Read off the formation through the
-        /// alignment's own required clearance rather than stored on the overhead class, so a tramway's 0.15 m and a
-        /// 25 kV line's 0.27 m come from the one place <see cref="RailLineClasses.Formation"/> writes them.
+        /// <summary> The electrical clearance the wire keeps below a structure, in metres. Read straight off the
+        /// formation figure the alignment carries -- a tramway's 0.15 m at 750 V DC and a 25 kV line's 0.27 m come from
+        /// the one place <see cref="RailLineClasses.Formation"/> writes them, through
+        /// <see cref="RailAlignmentPlan.electricalClearanceMetres"/>.
         ///
-        /// It is recovered by SUBTRACTION -- the alignment's requirement less the nominal wire height -- because
-        /// <see cref="RailFormationClass.RequiredStructureClearanceMetres"/> returns the maximum of the wire case and
-        /// the loading gauge, and on a tramway the gauge is the larger. Where the gauge governs, the subtraction goes
-        /// negative and the class figure is used instead; that is not a fallback for a missing value, it is the correct
-        /// answer, because a tramway's bridge is sized by its vehicle and its wire still needs 0.15 m of air. </summary>
+        /// It used to be recovered by subtracting a re-derived nominal wire height from the alignment's required
+        /// structure clearance. That was circular: the nominal was itself the requirement minus 0.27, so the two
+        /// cancelled and every class -- tram or 25 kV -- came back 0.27, and a tramway was lowered by the 25 kV air gap
+        /// its 750 V wire does not need. The clearance is a class figure, so it is now read as one. </summary>
         private static float ClearanceOf(RailAlignmentPlan alignment, RailOverheadClass cls)
         {
-            double implied = alignment.requiredStructureClearanceMetres
-                             - PlanNominal(alignment, cls);
-            if (implied > 0.0 && implied < 1.0) { return (float)implied; }
+            double clearance = alignment.electricalClearanceMetres;
+            if (clearance > 0.0 && clearance < 1.0) { return (float)clearance; }
             return 0.27f;
-        }
-
-        /// <summary> The nominal wire height the alignment's clearance figure was built from. Kept beside
-        /// <see cref="ClearanceOf"/> because the two are one recovery done in two halves and separating them further
-        /// would let one be edited without the other. </summary>
-        private static double PlanNominal(RailAlignmentPlan alignment, RailOverheadClass cls)
-        {
-            double byGauge = alignment.requiredStructureClearanceMetres - 0.27;
-            return byGauge > 0.0 ? byGauge : 5.3;
         }
 
         /// <summary> Pull the wire down GRADUALLY into a lowered mast rather than in one step.

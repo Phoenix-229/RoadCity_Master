@@ -354,23 +354,24 @@ namespace RoadCityMaster
                 // MakeSplatMap returns null for exactly one reason the author can act on: it found no built road to
                 // trace. Either the chosen road has been deleted since it was chosen, or no road in the scene has been
                 // built yet -- a road with no spline has no centre line to paint.
-                Debug.LogWarning("Road & City Master: no splat map was made for \"" + terrain.transform.name + "\","
-                    + " because there was no built road to trace for " + scope + ". Build the roads first; a splat map"
-                    + " of the background colour alone carries nothing.");
+                Debug.LogWarning(InspectorFieldRegistry.ProductDisplayName + ": no splat map was made for \""
+                    + terrain.transform.name + "\", because there was no built road to trace for " + scope
+                    + ". Build the roads first; a splat map of the background colour alone carries nothing.");
                 return;
             }
 
             string path = UnityEditor.EditorUtility.SaveFilePanel("Save splat map", Application.dataPath, "Splat", "png");
             if (string.IsNullOrEmpty(path))
             {
-                Debug.Log("Road & City Master: the splat map for \"" + terrain.transform.name + "\" was made but not"
-                    + " saved, because the save panel was dismissed.");
+                Debug.Log(InspectorFieldRegistry.ProductDisplayName + ": the splat map for \""
+                    + terrain.transform.name + "\" was made but not saved, because the save panel was dismissed.");
                 return;
             }
 
             System.IO.File.WriteAllBytes(path, bytes);
-            Debug.Log("Road & City Master: wrote a " + terrain.splatResoWidth + " x " + terrain.splatResoHeight
-                + " splat map of " + scope + " on \"" + terrain.transform.name + "\" to " + path);
+            Debug.Log(InspectorFieldRegistry.ProductDisplayName + ": wrote a " + terrain.splatResoWidth + " x "
+                + terrain.splatResoHeight + " splat map of " + scope + " on \"" + terrain.transform.name + "\" to "
+                + path);
         }
     }
 }

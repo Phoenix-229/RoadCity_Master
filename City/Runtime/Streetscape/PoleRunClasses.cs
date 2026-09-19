@@ -50,12 +50,12 @@ namespace RoadCityMaster.City
         /// <summary> The electrical block for one column. The clearances, the tension fraction and the setting rule are
         /// left at their specification values; what changes is the span and the conductor strung over it.
         ///
-        /// * Urban and suburban: 1/0 6/1 ACSR (Raven) -- 3.03 N/m, 19.1 kN rated, 10.1 mm overall. The ordinary
+        /// * Urban and suburban: 1/0 6/1 ACSR (Raven) -- 2.12 N/m, 19.1 kN rated, 10.1 mm overall. The ordinary
         ///   overhead distribution conductor at this voltage, and the one <see cref="DistributionPoleClass"/> already
         ///   defaults to.
         /// * Rural highway: 4/0 6/1 ACSR (Penguin) -- 4.24 N/m, 37.1 kN rated, 14.3 mm overall. Heavier per metre, but
-        ///   nearly twice the strength, so at 20 % everyday tension a 75 m span sags 0.40 m where Raven would sag
-        ///   0.56 m. </summary>
+        ///   nearly twice the strength: at 20 % everyday tension a 75 m span sags about 0.40 m on Penguin and about
+        ///   0.39 m on Raven, so the heavier wire buys the longer rural span at no clearance cost. </summary>
         public static DistributionPoleClass Electrical(PoleRunClass runClass)
         {
             DistributionPoleClass e = DistributionPoleClass.Default();

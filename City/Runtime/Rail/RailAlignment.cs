@@ -200,6 +200,31 @@ namespace RoadCityMaster.City
         public Material sleeperMaterial = null;
         public Material railMaterial = null;
         public Material crossingMaterial = null;
+
+        /// <summary> B-27 / D-7. The three surfaces the ELECTRIFICATION is made of, asked for on the same rule as the
+        /// four above. Three rather than one because an overhead line's parts weather nothing like each other: a mast
+        /// is galvanised steel gone chalky, its registration arm and fittings are a mix of aluminium-bronze casting
+        /// and porcelain, and the wire itself is drawn copper that polishes bright on its underside where the
+        /// pantograph rubs it. One slot for all three would make the wire read as painted steel, which is the single
+        /// most obvious way a rendered catenary looks wrong.
+        ///
+        /// They live on the settings rather than on the overhead class because a class is a STANDARD -- a span, a
+        /// height, a dropper spacing, all of which come from the electrification system adopted -- and what colour
+        /// the steel is on this particular line is not part of any standard. </summary>
+        public Material ohleMastMaterial = null;
+        public Material ohleBracketMaterial = null;
+        public Material ohleWireMaterial = null;
+
+        /// <summary> An optional authored mast to stand instead of the generated steel tube, placed at each mast
+        /// position with +X facing the track.
+        ///
+        /// There is deliberately NO matching wire prefab. A mast is a repeated object -- the same casting bolted down
+        /// every fifty metres -- so one mesh reused at many positions is exactly what the real thing is. A contact
+        /// wire is not: its shape is the catenary its OWN span hangs in, solved per span from that span's length,
+        /// tension and the height of the two masts it is strung between, and no two spans on a real run share it. A
+        /// prefab there would freeze one span's sag and stamp it on every other, which is a wire that visibly does not
+        /// touch the masts it is tied to. The wire is generated, and that is the only correct answer. </summary>
+        public GameObject ohleMastPrefab = null;
     }
 
 
@@ -330,6 +355,12 @@ namespace RoadCityMaster.City
         public int trackCount = 1;
         public double formationWidthMetres;
         public double requiredStructureClearanceMetres;
+
+        /// <summary> The air gap the contact wire keeps below an earthed structure, in metres, taken straight off the
+        /// formation for this class -- 0.15 m for a 750 V DC tramway, 0.27 m for a 25 kV line. Carried here so the
+        /// overhead pass reads the class's own figure directly instead of trying to recover it by subtraction. </summary>
+        public double electricalClearanceMetres = 0.27;
+
         public int sleeperCount;
         public int stationStopCount;
 
@@ -512,6 +543,7 @@ namespace RoadCityMaster.City
             plan.trackCount = settings.trackCount > 1 ? 2 : 1;
             plan.formationWidthMetres = form.FormationWidthMetres(plan.trackCount);
             plan.requiredStructureClearanceMetres = form.RequiredStructureClearanceMetres(settings.electrified);
+            plan.electricalClearanceMetres = form.electricalClearanceMetres;
             plan.sleeperCount = form.SleeperCount(solution.lengthMetres) * plan.trackCount;
             plan.totalTransitionLengthMetres = TotalTransitionLength(solution);
 

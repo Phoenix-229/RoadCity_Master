@@ -60,7 +60,7 @@ namespace RoadCityMaster.City
         public float maxNudgeMetres = 5f;
         public float nudgeStepMetres = 0.5f;
 
-        public float conductorUnitWeightNewtonsPerMetre = 3.03f;
+        public float conductorUnitWeightNewtonsPerMetre = 2.12f;
         public float conductorRatedStrengthNewtons = 19100f;
         public float conductorDiameterMetres = 0.0101f;
         public float everydayTensionFractionOfRatedStrength = 0.20f;
@@ -99,7 +99,7 @@ namespace RoadCityMaster.City
         {
             if (spanMetres <= 0.0) { return 0.0; }
             double weight = conductorUnitWeightNewtonsPerMetre > 0f
-                ? conductorUnitWeightNewtonsPerMetre : 3.03;
+                ? conductorUnitWeightNewtonsPerMetre : 2.12;
             double tension = EverydayTensionNewtons();
             if (tension <= 0.0) { return 0.0; }
             return (weight * spanMetres) / (8.0 * tension);

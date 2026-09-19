@@ -347,7 +347,7 @@ namespace RoadCityMaster.City.Editor
             {
                 if (GUILayout.Button("Build the railway", LegacyInspectorShell.CommandButtonStyle()))
                 {
-                    lastBuildLine = RailAlignmentBuilder.Build(line, cached);
+                    lastBuildLine = RailAlignmentBuilder.Build(line, cached, cachedOverhead);
                 }
             }
             if (GUILayout.Button("Clear it", LegacyInspectorShell.CommandButtonStyle()))

@@ -136,13 +136,13 @@ namespace RoadCityMaster
             {
                 Type type = types[t];
                 if (type == typeof(RcmGateSuite)) { continue; }
-                if (type.Name == "CityGraphGate" || type.Name == "StreetNetworkGenerationTest" ||
-                    type.Name == "DispositionGate" || type.Name == "InspectorStyleOwnershipGate" ||
-                    type.Name == "IntersectionGeometryGate" || type.Name == "LegacyInspectorGate" ||
-                    type.Name == "LegacyMathGate")
-                {
-                    continue;
-                }
+                // There is deliberately NO name-based skip list here. Discovery admits every gate the reflection
+                // filter below matches, without exception. A skip list in this method is indistinguishable from a
+                // green suite: the count on the verdict line drops, the failure count drops with it, and the report
+                // reads PASS while the defect the gate named is still in the tree. If a gate is genuinely obsolete
+                // its FILE is deleted in the same commit that deletes the thing it guarded -- it is never hidden
+                // from the walk while still on disk, because the next author greps for the type, finds it, and
+                // reasonably concludes it still runs. Do not reintroduce a filter here for any reason.
                 MethodInfo m = type.GetMethod(GateMethodName, BindingFlags.Public | BindingFlags.Static,
                     null, new Type[] { typeof(string).MakeByRefType() }, null);
                 if (m == null || m.ReturnType != typeof(bool)) { continue; }

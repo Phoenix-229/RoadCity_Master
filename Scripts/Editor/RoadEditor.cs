@@ -462,7 +462,7 @@ namespace RoadCityMaster
             // and the toggle immediately above it reads as the thing that governs it. The Field call inside the scope
             // is unchanged to the byte, because LegacyInspectorGate case 2 proves this field is still reachable by
             // finding this exact call.
-            using (new EditorGUI.DisabledScope(!isShouldersEnabled.boolValue))
+            using (new EditorGUI.DisabledScope(!road.isShouldersEnabled))
             {
                 LegacyInspectorShell.Field(serializedObject, "Road", "shoulderWidth", fields, resetShoulderWidth);
                 // RM-110, B-9. The shoulder's cross-fall, drawn under the width it applies across and inside the same
@@ -483,7 +483,7 @@ namespace RoadCityMaster
             // greyed when that toggle is off, and its tooltip NAMES the toggle -- a control greyed by something the
             // author cannot see on the same screen otherwise reads as broken rather than as unavailable. The change
             // test below cannot fire while the popup is disabled, which is what disabling it means.
-            using (new EditorGUI.DisabledScope(!isUsingDefaultMaterials.boolValue))
+            using (new EditorGUI.DisabledScope(!road.isUsingDefaultMaterials))
             {
                 int Old = roadMaterialDropdown.enumValueIndex;
                 EditorGUILayout.BeginHorizontal();
@@ -515,7 +515,7 @@ namespace RoadCityMaster
             //Option: Max grade value:
             // B-5, fault 7. Greyed, not hidden, for the same reason as the shoulder width above: the ceiling is part of
             // what an author needs to know the road HAS, whether or not it is being enforced this minute.
-            using (new EditorGUI.DisabledScope(!isMaxGradeEnabled.boolValue))
+            using (new EditorGUI.DisabledScope(!road.isMaxGradeEnabled))
             {
                 // RM-102. This was a 0–1 slider, which let an author set a 100% grade -- a 45° road -- and said
                 // nothing about it. Through the drawer it is a fraction with AASHTO's 6–12% working band and a 15%
@@ -603,7 +603,7 @@ namespace RoadCityMaster
                 isHeightModificationEnabled.boolValue);
 
             //Option: heights width
-            using (new EditorGUI.DisabledScope(!isHeightModificationEnabled.boolValue))
+            using (new EditorGUI.DisabledScope(!road.isHeightModificationEnabled))
             {
                 EditorGUILayout.BeginHorizontal();
                 fields.FloatSlider(matchHeightsDistance, "Heights match width", 0.01f, 512f,
@@ -625,7 +625,7 @@ namespace RoadCityMaster
                 isDetailModificationEnabled.boolValue);
 
             //Option: details width and height
-            using (new EditorGUI.DisabledScope(!isDetailModificationEnabled.boolValue))
+            using (new EditorGUI.DisabledScope(!road.isDetailModificationEnabled))
             {
                 EditorGUILayout.BeginHorizontal();
                 fields.FloatSlider(clearDetailsDistance, "Details clear width", 0.01f, 512f,
@@ -658,7 +658,7 @@ namespace RoadCityMaster
                 + "yourself and leaving this off."), isTreeModificationEnabled.boolValue);
 
             //Option: tree widths and height
-            using (new EditorGUI.DisabledScope(!isTreeModificationEnabled.boolValue))
+            using (new EditorGUI.DisabledScope(!road.isTreeModificationEnabled))
             {
                 EditorGUILayout.BeginHorizontal();
                 fields.FloatSlider(clearTreesDistance, "Trees clear width", 0.01f, 512f,
@@ -734,7 +734,7 @@ namespace RoadCityMaster
             EditorGUILayout.EndHorizontal();
 
             //Option: road cuts:
-            using (new EditorGUI.DisabledScope(isDynamicCutsEnabled.boolValue))
+            using (new EditorGUI.DisabledScope(road.isDynamicCutsEnabled))
             {
                 isRoadCutsEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Auto split road",
                     "Cut the road mesh where it meets an intersection, so the piece inside the junction can be hidden "
@@ -742,7 +742,7 @@ namespace RoadCityMaster
             }
 
             //Option: shoulder cuts:
-            using (new EditorGUI.DisabledScope(isDynamicCutsEnabled.boolValue || !isShouldersEnabled.boolValue))
+            using (new EditorGUI.DisabledScope(road.isDynamicCutsEnabled || !road.isShouldersEnabled))
             {
                 isShoulderCutsEnabled.boolValue = EditorGUILayout.Toggle(new GUIContent("Auto split shoulders",
                     "Cut the shoulder meshes in the same places as the road. Available while this road has shoulders."),
@@ -864,12 +864,13 @@ namespace RoadCityMaster
             // that answers a click with nothing at all, which is this entry's own definition of a control
             // indistinguishable from a stub. Disabling it says the same thing the swallowed press was trying to say,
             // and says it before the author clicks rather than after.
-            EditorGUI.BeginDisabledGroup(!isApplyingMaterialsCheck);
-            if (GUILayout.Button("Apply", EditorStyles.miniButton, GUILayout.Width(60f)))
+            using (new EditorGUI.DisabledScope(!isApplyingMaterialsCheck))
             {
-                isApplyingMatsCheck = true;
+                if (GUILayout.Button("Apply", EditorStyles.miniButton, GUILayout.Width(60f)))
+                {
+                    isApplyingMatsCheck = true;
+                }
             }
-            EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.LabelField("Applying will overwrite any saved cuts' material(s).");
 
@@ -888,17 +889,19 @@ namespace RoadCityMaster
             // `if (GUILayout.Button(...) && isResetingTH)` inside the branch where `isResetingTH` is false by
             // construction -- a body that could never run, guarding a press that was therefore silently dropped. One
             // button in a disabled group is the same gesture with the dead half deleted rather than left beside it.
-            EditorGUI.BeginDisabledGroup(!isResetingTH);
-            if (GUILayout.Button("Reset"))
+            using (new EditorGUI.DisabledScope(!isResetingTH))
             {
-                road.ResetTerrainHistory();
-                isResetingTH = false;
-                // The work is a deletion, it is irreversible by the warning's own admission, and it leaves nothing on
-                // screen that changed -- so without this line the author cannot tell a reset from a dropped click.
-                Debug.Log("Road & City Master: the terrain history of \"" + road.name + "\" was reset. The ground this"
-                    + " road changed can no longer be put back as it was.");
+                if (GUILayout.Button("Reset"))
+                {
+                    road.ResetTerrainHistory();
+                    isResetingTH = false;
+                    // The work is a deletion, it is irreversible by the warning's own admission, and it leaves nothing
+                    // on screen that changed -- so without this line the author cannot tell a reset from a dropped
+                    // click.
+                    Debug.Log(InspectorFieldRegistry.ProductDisplayName + ": the terrain history of \"" + road.name
+                        + "\" was reset. The ground this road changed can no longer be put back as it was.");
+                }
             }
-            EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
 
             if (isResetingTH)
@@ -1050,9 +1053,9 @@ namespace RoadCityMaster
                     // one accomplishes literally nothing, so only this one says so.
                     if (road.MeshRoad == null)
                     {
-                        Debug.LogWarning("Road & City Master: \"" + road.name + "\" has no road mesh yet, so there was"
-                            + " nothing for Apply to put the materials on. Build the road first; the materials listed"
-                            + " here are already saved and the build will use them.");
+                        Debug.LogWarning(InspectorFieldRegistry.ProductDisplayName + ": \"" + road.name + "\" has no"
+                            + " road mesh yet, so there was nothing for Apply to put the materials on. Build the road"
+                            + " first; the materials listed here are already saved and the build will use them.");
                     }
                     road.SetAllCutsToCurrentMaterials();
                 }

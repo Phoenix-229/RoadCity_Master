@@ -161,13 +161,6 @@ namespace RoadCityMaster.City
             published[Key(nodeId, portName)] = value;
         }
 
-        /// <summary> True when that output port has a value on the bus. </summary>
-        public bool HasOutput(string nodeId, string portName)
-        {
-            return !string.IsNullOrEmpty(nodeId) && !string.IsNullOrEmpty(portName)
-                   && published.ContainsKey(Key(nodeId, portName));
-        }
-
         /// <summary> Reads a finished output by node and port without pretending it is an input edge. This is the
         /// hand-off used by editor tools after a bake; graph nodes continue to use <see cref="TryReadInput"/>. </summary>
         public bool TryTakeOutput(string nodeId, string portName, out object value)

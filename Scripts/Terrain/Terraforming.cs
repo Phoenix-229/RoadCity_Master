@@ -569,12 +569,13 @@ namespace RoadCityMaster
                         }
                         TTD.MainDetailsX = null;
                         TTD.MainDetailsY = null;
-                        // Editor only: forcing a full collection is worth a pause while authoring, but in a player
-                        // it is a frame hitch in the middle of a build, which is the one place a game cannot afford
-                        // one. Dropping the references above is what actually frees the detail arrays.
-                        #if UNITY_EDITOR
-                        System.GC.Collect();
-                        #endif
+                        // Dropping the references above is what actually frees the detail arrays; the collector
+                        // reclaims them on its own schedule. A forced System.GC.Collect() here used to run once per
+                        // detail layer, per terrain, per temp-data block -- many full, blocking collections inside a
+                        // single build step -- which stalls the main thread and raises the editor's "Hold On" modal
+                        // mid-edit. Modern Unity's incremental GC handles this without a hitch, so the forced collect
+                        // is gone: this is a per-frame authoring pause the tool must not cause. (Legacy imported
+                        // pattern, modernised.)
                     }
                     //Trees:
                     if (_spline.road.isTreeModificationEnabled && TTD.TreesCurrent != null && TTD.treesCount > 0)
@@ -767,10 +768,9 @@ namespace RoadCityMaster
 
             // One announcement for the whole delete, batched into a few tight boxes rather than one per region.
             gateway.EndBuild();
-            // Editor only, for the same reason as in the build path above.
-            #if UNITY_EDITOR
-            System.GC.Collect();
-            #endif
+            // No forced collection here: it blocked the main thread on the reset path the same way it did on the
+            // build path, and the incremental GC reclaims the released arrays without a stall. (Legacy imported
+            // pattern, modernised.)
         }
     }
 }

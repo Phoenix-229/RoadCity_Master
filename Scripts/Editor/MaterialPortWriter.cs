@@ -30,8 +30,7 @@ namespace RoadCityMaster
 
         public static string DocPath()
         {
-            return Path.Combine(Application.dataPath,
-                Path.Combine("RoadCityMaster", Path.Combine("Docs", "MaterialPort.md")));
+            return Path.Combine(DispositionDocWriter.DocsRoot(), "MaterialPort.md");
         }
 
         [MenuItem("Window/Road City Master/Documentation/Write the material port record")]

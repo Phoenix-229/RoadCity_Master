@@ -461,13 +461,25 @@ namespace RoadCityMaster
         public const string TableBegin = "<!-- disposition-table:begin";
         public const string TableEnd = "<!-- disposition-table:end -->";
 
-        public static string DocPath()
+        /// <summary> The one folder every scaffolding document lives in, moved OUT of the Unity Assets tree at the
+        /// author's request (2026-09-19): these .md are build-time records, not shipped tool content, so importing
+        /// them only fills the project with metas. It sits beside Assets in the project root -- reachable by the
+        /// writers and the gates, but not by Unity's importer. Every DocPath() in the tool resolves through here so
+        /// the location is defined once. </summary>
+        public static string DocsRoot()
         {
-            return Path.Combine(Application.dataPath,
-                Path.Combine("RoadCityMaster", Path.Combine("Docs", "Disposition.md")));
+            System.IO.DirectoryInfo parent = System.IO.Directory.GetParent(Application.dataPath);
+            string root = parent == null ? Application.dataPath : parent.FullName;
+            return Path.Combine(root, "RoadCityMaster_Docs");
         }
 
-        /// <summary> The tool root, for the gate's check that every item the register names still exists. </summary>
+        public static string DocPath()
+        {
+            return Path.Combine(DocsRoot(), "Disposition.md");
+        }
+
+        /// <summary> The tool root, for the gate's check that every item the register names still exists. This is the
+        /// CODE root inside Assets and does NOT move with the docs -- the source scans read it. </summary>
         public static string ToolRoot()
         {
             return Path.Combine(Application.dataPath, "RoadCityMaster");

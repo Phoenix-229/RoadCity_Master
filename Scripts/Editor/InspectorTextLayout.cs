@@ -169,14 +169,15 @@ namespace RoadCityMaster
 
         #region "The label column (B-4)"
         /// <summary> The widest prefix label this tool actually draws, found by sweeping every labelled field call in
-        /// the editor folder rather than guessed: `"Align objects to road rotation: "` at 32 characters. The column is
-        /// MEASURED from it instead of being given a pixel number, so it stays right when the editor's font or DPI
-        /// scaling differs from this machine's -- a hardcoded 210px is correct on one display and wrong on the next.
+        /// the editor folder rather than guessed: `"Fit a row per continent bucket as well as the world row"` at 55
+        /// characters (GeoNamesImportWindow). The column is MEASURED from it instead of being given a pixel number, so
+        /// it stays right when the editor's font or DPI scaling differs from this machine's -- a hardcoded 210px is
+        /// correct on one display and wrong on the next.
         ///
         /// Public so <see cref="InspectorStyleOwnershipGate"/> can re-run that sweep and fail if a longer prefix label
         /// is added later: the yardstick going stale is exactly how a sized column quietly becomes a narrow one again.
         /// </summary>
-        public const string WidestLabel = "Align objects to road rotation: ";
+        public const string WidestLabel = "Fit a row per continent bucket as well as the world row";
 
         /// <summary> Measured once per domain load. `CalcSize` is cheap but not free, and this runs on every repaint of
         /// every inspector in the tool; the metrics it depends on do not change without a reload. </summary>

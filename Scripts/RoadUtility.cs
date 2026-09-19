@@ -165,13 +165,17 @@ namespace RoadCityMaster
 
             if (_road.TerrainHistory.Count > 0)
             {
-                //Delete unnecessary terrain histories:
-                foreach (TerrainHistoryMaker THMaker in _road.TerrainHistory)
+                //Delete unnecessary terrain histories. Walked back-to-front and removed by index: removing from a
+                //List while a foreach enumerates it throws "Collection was modified", which a rebuild hit whenever a
+                //stored history pointed at a terrain no longer in the scene (build a road, remove or replace a
+                //terrain, rebuild). Nullify() still runs before the entry leaves the list.
+                for (int index = _road.TerrainHistory.Count - 1; index >= 0; index--)
                 {
+                    TerrainHistoryMaker THMaker = _road.TerrainHistory[index];
                     if (!terrainIDs.Contains(THMaker.terrainID))
                     {
                         THMaker.Nullify();
-                        _road.TerrainHistory.Remove(THMaker);
+                        _road.TerrainHistory.RemoveAt(index);
                     }
                 }
             }

@@ -60,6 +60,7 @@ namespace RoadCityMaster.City.Editor
             builder.Append("RCMNETGEN BEGIN\n");
             List<string> failures = new List<string>();
             RoadSystem system = null;
+            GameObject terrainGo = null;
 
             try
             {
@@ -87,6 +88,16 @@ namespace RoadCityMaster.City.Editor
                 CheckStructure(first, failures);
                 CheckSeedsDiffer(first, other, failures);
 
+                // A real Unity Terrain under the whole region. The realizer places road-tool nodes, and a road node
+                // is refused unless ground covers it (B-13, RoadNodeGround): a real city bake always has terrain, so
+                // the test that stands in for one must too. Without it every node is refused and the roads come out
+                // empty -- which is a gap in the test's world, not the realizer.
+                TerrainData terrainData = new TerrainData();
+                terrainData.heightmapResolution = 33;
+                terrainData.size = new Vector3(region.width, 100f, region.height);
+                terrainGo = Terrain.CreateTerrainGameObject(terrainData);
+                terrainGo.transform.position = new Vector3(region.xMin, 0f, region.yMin);
+
                 system = NetworkRoadBuilder.Build(first, catalog);
                 CheckRealization(system, first, failures);
 
@@ -98,6 +109,13 @@ namespace RoadCityMaster.City.Editor
                 if (system != null)
                 {
                     Object.DestroyImmediate(system.gameObject);
+                }
+                if (terrainGo != null)
+                {
+                    Terrain terrain = terrainGo.GetComponent<Terrain>();
+                    TerrainData data = terrain != null ? terrain.terrainData : null;
+                    Object.DestroyImmediate(terrainGo);
+                    if (data != null) { Object.DestroyImmediate(data); }
                 }
             }
 

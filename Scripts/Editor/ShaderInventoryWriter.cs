@@ -36,8 +36,7 @@ namespace RoadCityMaster
 
         public static string DocPath()
         {
-            return Path.Combine(Application.dataPath,
-                Path.Combine("RoadCityMaster", Path.Combine("Docs", "ShaderInventory.md")));
+            return Path.Combine(DispositionDocWriter.DocsRoot(), "ShaderInventory.md");
         }
 
         [MenuItem("Window/Road City Master/Documentation/Write the shader and material inventory")]

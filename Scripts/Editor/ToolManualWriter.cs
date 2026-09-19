@@ -42,8 +42,7 @@ namespace RoadCityMaster
         /// <summary> The manual, beside RM-49's findings, RM-50's census and RM-64's checklist. </summary>
         public static string ManualPath()
         {
-            return Path.Combine(Application.dataPath,
-                Path.Combine("RoadCityMaster", Path.Combine("Docs", "Manual.md")));
+            return Path.Combine(DispositionDocWriter.DocsRoot(), "Manual.md");
         }
 
         [MenuItem("Window/Road City Master/Documentation/Write the manual's generated tables")]

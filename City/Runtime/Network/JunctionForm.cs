@@ -339,8 +339,8 @@ namespace RoadCityMaster.City
 
             if (request.spanLengthMetres <= 0.0)
             {
-                return Refuse(plan, "the flyover was resolved but no deck length was given, so there is no span to"
-                    + " mark for the bridge prefab to sit on");
+                return Refuse(plan, "the flyover was resolved but the deck length given is "
+                    + F(request.spanLengthMetres) + " m, so there is no span to mark for the bridge prefab to sit on");
             }
             double spanStart;
             double spanEnd;

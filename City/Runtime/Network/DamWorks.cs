@@ -231,6 +231,77 @@ namespace RoadCityMaster.City
     }
 
 
+    /// <summary> Whether the body the author drew would actually stand, by the two checks a gravity dam is designed
+    /// against: sliding along the foundation contact and overturning about the downstream toe. Both are reported as a
+    /// factor of safety -- resisting effect over driving effect -- so a figure below 1 is a dam that fails, and the
+    /// codes ask for margin above that (USBR: 1.5 sliding with no cohesion counted; ICOLD asks 2.0 for overturning on
+    /// the normal load case).
+    ///
+    /// Three things here are easy to get wrong and are done properly, because a wrong factor of safety reads exactly
+    /// like a right one:
+    ///
+    /// 1. The water load is the RESERVOIR head, not the structural height. Water stands at crest minus freeboard --
+    ///    that is what freeboard means -- so driving the hydrostatic force off the full height overstates it by the
+    ///    freeboard on a squared term. Tailwater on the downstream face pushes BACK, so it is subtracted, not ignored.
+    ///
+    /// 2. Uplift is included. Water enters the foundation contact and presses the dam UP, and on a real gravity
+    ///    section it removes a large fraction of the weight that friction depends on -- it is the reason the classical
+    ///    "weight over water push" sum is optimistic, and the reason drainage galleries exist at all. The distribution
+    ///    taken here is the undrained trapezoid: full reservoir pressure at the heel falling linearly to tailwater
+    ///    pressure at the toe. That is the conservative case and the one a section without a working drain line
+    ///    actually sees.
+    ///
+    /// 3. The weight acts through the real centroid of the trapezoidal section, found by decomposing it into the
+    ///    upstream batter triangle, the middle rectangle and the downstream batter triangle and taking the
+    ///    area-weighted mean. The B/3 shortcut is only correct for a triangular section with a vertical upstream face,
+    ///    and every metre of crest width and upstream batter moves the true centroid away from it.
+    ///
+    /// Everything is computed PER METRE of crest length: both the resisting and the driving side scale with length, so
+    /// it cancels, and carrying it would only invite a unit error. </summary>
+    [Serializable]
+    public struct DamStability
+    {
+        public bool resolved;
+        public string refusal;
+
+        /// <summary> Self-weight of one metre run of the section, in newtons. </summary>
+        public double weightPerMetreNewtons;
+
+        /// <summary> Uplift force on one metre run of the foundation contact, in newtons, acting upward. </summary>
+        public double upliftPerMetreNewtons;
+
+        /// <summary> Net horizontal water push on one metre run: upstream hydrostatic less tailwater, in newtons.
+        /// </summary>
+        public double netHorizontalPerMetreNewtons;
+
+        /// <summary> Distance from the upstream heel to the section's centroid, in metres. </summary>
+        public double centroidFromHeelMetres;
+
+        /// <summary> Resisting over driving along the foundation contact. </summary>
+        public double slidingFactorOfSafety;
+
+        /// <summary> Stabilising over overturning moment about the downstream toe. </summary>
+        public double overturningFactorOfSafety;
+
+        /// <summary> The reservoir head the section is loaded by: surface level less the foundation. </summary>
+        public double headMetres;
+
+        public string Describe()
+        {
+            if (!resolved)
+            {
+                return "stability refused: " + (string.IsNullOrEmpty(refusal) ? "unstated" : refusal);
+            }
+            return "stands against sliding " + M(slidingFactorOfSafety) + " and overturning "
+                + M(overturningFactorOfSafety) + " under " + M(headMetres) + " m of head, with uplift "
+                + M(upliftPerMetreNewtons / 1000.0) + " kN per metre run removing "
+                + M(100.0 * upliftPerMetreNewtons / weightPerMetreNewtons) + "% of the section's weight";
+        }
+
+        private static string M(double v) { return v.ToString("0.##", CultureInfo.InvariantCulture); }
+    }
+
+
     /// <summary> The whole request the dam states for Universe Creator to answer, gathered as data. Road & City Master
     /// computes every figure on its own side and never touches the water body itself; this struct is what travels
     /// through the linker so UC can raise the reservoir, lower the tailwater and key the terrain into the abutments on
@@ -566,6 +637,127 @@ namespace RoadCityMaster.City
             o.present = true;
             o.refusal = string.Empty;
             return o;
+        }
+
+        /// <summary> Unit weight of mass concrete, in newtons per cubic metre: 2400 kg/m3 under standard gravity. The
+        /// figure USBR's Design of Small Dams carries for unreinforced mass concrete, which is what a gravity section
+        /// is -- it is placed for weight, not for tension, so it holds very little steel. </summary>
+        public const double ConcreteUnitWeightNewtonsPerCubicMetre = 2400.0 * Gravity;
+
+        /// <summary> Unit weight of fresh water, in newtons per cubic metre, at the same standard gravity. </summary>
+        public const double WaterUnitWeightNewtonsPerCubicMetre = 1000.0 * Gravity;
+
+        /// <summary> The sliding factor of safety a gravity dam is designed to clear on the normal load case with no
+        /// cohesion counted (USBR). Reported against, never silently enforced. </summary>
+        public const double MinSlidingFactorOfSafety = 1.5;
+
+        /// <summary> The overturning factor of safety asked for about the downstream toe on the normal load case.
+        /// </summary>
+        public const double MinOverturningFactorOfSafety = 2.0;
+
+        /// <summary> Whether the section would stand, by the sliding and overturning checks. See
+        /// <see cref="DamStability"/> for why the water load is the reservoir head rather than the structural height,
+        /// why uplift is in the sum, and why the centroid is decomposed rather than taken as B/3.
+        ///
+        /// <paramref name="frictionAngleDeg"/> is the friction angle of the concrete-on-rock contact; 45 degrees is
+        /// sound rock. <paramref name="cohesionPascals"/> is the contact's cohesion -- pass zero for the check the
+        /// codes actually ask for, because cohesion is the part of the shear strength a fissure destroys and it is
+        /// conventionally not counted on unless drilling has proven it. </summary>
+        public static DamStability Stability(DamProfile profile, double tailwaterLevelMetres, double frictionAngleDeg,
+            double cohesionPascals)
+        {
+            DamStability s = new DamStability();
+            if (!profile.resolved)
+            {
+                s.refusal = "the dam body was refused, so there is no section to check: " + profile.refusal;
+                return s;
+            }
+            if (IsBad(tailwaterLevelMetres) || IsBad(frictionAngleDeg) || IsBad(cohesionPascals))
+            {
+                s.refusal = "a stability figure is not a finite number";
+                return s;
+            }
+            if (frictionAngleDeg <= 0.0 || frictionAngleDeg >= 90.0)
+            {
+                s.refusal = "the foundation friction angle must lie between 0 and 90 degrees";
+                return s;
+            }
+            if (cohesionPascals < 0.0) { s.refusal = "cohesion cannot be negative"; return s; }
+
+            double height = profile.structuralHeightMetres;
+            double foundationLevel = profile.crestLevelMetres - height;
+            double baseWidth = profile.baseWidthMetres;
+
+            // The section, front to back at the base: the upstream batter runs out by height * its run-per-rise, the
+            // crest width sits in the middle, the downstream batter runs out by height * its own run-per-rise.
+            double upstreamRun = height * profile.upstreamRunPerRise;
+            double downstreamRun = height * profile.downstreamRunPerRise;
+
+            // Area-weighted centroid, measured from the upstream heel. The two batters are triangles whose centroids
+            // sit one third of the run from their own vertical side; the crest block is a rectangle centred on itself.
+            double areaUpstream = 0.5 * upstreamRun * height;
+            double areaMiddle = profile.crestWidthMetres * height;
+            double areaDownstream = 0.5 * downstreamRun * height;
+            double area = areaUpstream + areaMiddle + areaDownstream;
+            if (area <= 0.0) { s.refusal = "the section encloses no area, so it has no weight"; return s; }
+
+            double centroidUpstream = upstreamRun * 2.0 / 3.0;
+            double centroidMiddle = upstreamRun + profile.crestWidthMetres * 0.5;
+            double centroidDownstream = upstreamRun + profile.crestWidthMetres + downstreamRun / 3.0;
+            double centroid = (areaUpstream * centroidUpstream + areaMiddle * centroidMiddle
+                + areaDownstream * centroidDownstream) / area;
+
+            // Water loads. The reservoir stands at crest minus freeboard, NOT at the crest.
+            double head = profile.reservoirSurfaceLevelMetres - foundationLevel;
+            if (head < 0.0) { head = 0.0; }
+            double tailDepth = tailwaterLevelMetres - foundationLevel;
+            if (tailDepth < 0.0) { tailDepth = 0.0; }
+            if (tailDepth > height) { tailDepth = height; }
+
+            double gammaW = WaterUnitWeightNewtonsPerCubicMetre;
+            double weight = area * ConcreteUnitWeightNewtonsPerCubicMetre;
+
+            // Horizontal hydrostatic thrust per metre run is the triangular pressure prism, gamma * h^2 / 2, and it
+            // acts at h/3 above the base. Tailwater pushes the other way with the same law.
+            double pushUpstream = gammaW * head * head * 0.5;
+            double pushDownstream = gammaW * tailDepth * tailDepth * 0.5;
+            double netPush = pushUpstream - pushDownstream;
+
+            // Uplift on the contact: full reservoir pressure at the heel falling linearly to tailwater at the toe.
+            double pressureHeel = gammaW * head;
+            double pressureToe = gammaW * tailDepth;
+            double uplift = 0.5 * (pressureHeel + pressureToe) * baseWidth;
+
+            // Where that trapezoid of pressure acts, measured from the heel. For a linear distribution the centroid
+            // sits at B/3 * (p_heel + 2 * p_toe) / (p_heel + p_toe); equal pressures give B/2, as they must.
+            double pressureSum = pressureHeel + pressureToe;
+            double upliftArmFromHeel = pressureSum <= 0.0 ? baseWidth * 0.5
+                : baseWidth * (pressureHeel + 2.0 * pressureToe) / (3.0 * pressureSum);
+
+            double effectiveWeight = weight - uplift;
+            double frictionRad = frictionAngleDeg * Math.PI / 180.0;
+            double resistingShear = (effectiveWeight > 0.0 ? effectiveWeight : 0.0) * Math.Tan(frictionRad)
+                + cohesionPascals * baseWidth;
+
+            s.weightPerMetreNewtons = weight;
+            s.upliftPerMetreNewtons = uplift;
+            s.netHorizontalPerMetreNewtons = netPush;
+            s.centroidFromHeelMetres = centroid;
+            s.headMetres = head;
+
+            // Moments about the downstream toe. Weight and uplift both act on lever arms measured from the toe, so a
+            // distance from the heel becomes baseWidth minus itself. Uplift is destabilising: it lifts the heel.
+            double weightArm = baseWidth - centroid;
+            double upliftArm = baseWidth - upliftArmFromHeel;
+            double stabilising = weight * weightArm;
+            double overturning = pushUpstream * (head / 3.0) + uplift * upliftArm
+                - pushDownstream * (tailDepth / 3.0);
+
+            s.slidingFactorOfSafety = netPush <= 0.0 ? double.PositiveInfinity : resistingShear / netPush;
+            s.overturningFactorOfSafety = overturning <= 0.0 ? double.PositiveInfinity : stabilising / overturning;
+            s.resolved = true;
+            s.refusal = string.Empty;
+            return s;
         }
 
         /// <summary> The whole dam, from geometry and terrain to the request UC answers. Reads the valley first (its
